@@ -727,6 +727,39 @@ export default function AdminApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // busca de preço: procura pelo nome do produto em todas as compras já lançadas
+  const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const resultadosBuscaCompra = useMemo(() => {
+    const termo = semAcento(buscaCompra);
+    if (!termo) return [];
+    const out = [];
+    historicoCompras.forEach((m) => {
+      const itens = m.itens && m.itens.length > 0 ? m.itens : [];
+      itens.forEach((it) => {
+        const nome = it.produto || it.nome || "";
+        if (!semAcento(nome).includes(termo)) return;
+        const qtd = Number(it.quantidade ?? it.qtd ?? 0);
+        const unico = itens.length === 1;
+        out.push({
+          key: `${m.id}-${nome}`,
+          nome,
+          qtd,
+          unidade: it.unidade,
+          total: m.valor,
+          precoUnit: unico && qtd > 0 ? m.valor / qtd : null,
+          data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""),
+          varios: !unico,
+          compra: m,
+        });
+      });
+      // compras antigas sem itens: tenta achar no texto da descrição
+      if (itens.length === 0 && semAcento(m.descricao).includes(termo)) {
+        out.push({ key: `${m.id}-desc`, nome: m.descricao, qtd: 0, unidade: "un", total: m.valor, precoUnit: null, data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""), varios: true, compra: m });
+      }
+    });
+    return out.sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
+  }, [buscaCompra, historicoCompras]);
+
   const abrirCaixa = async () => {
     const { data, error } = await supabase
       .from("caixas")
@@ -1352,39 +1385,6 @@ export default function AdminApp() {
       </Card>
     );
   };
-
-  // busca de preço: procura pelo nome do produto em todas as compras já lançadas
-  const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-  const resultadosBuscaCompra = useMemo(() => {
-    const termo = semAcento(buscaCompra);
-    if (!termo) return [];
-    const out = [];
-    historicoCompras.forEach((m) => {
-      const itens = m.itens && m.itens.length > 0 ? m.itens : [];
-      itens.forEach((it) => {
-        const nome = it.produto || it.nome || "";
-        if (!semAcento(nome).includes(termo)) return;
-        const qtd = Number(it.quantidade ?? it.qtd ?? 0);
-        const unico = itens.length === 1;
-        out.push({
-          key: `${m.id}-${nome}`,
-          nome,
-          qtd,
-          unidade: it.unidade,
-          total: m.valor,
-          precoUnit: unico && qtd > 0 ? m.valor / qtd : null,
-          data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""),
-          varios: !unico,
-          compra: m,
-        });
-      });
-      // compras antigas sem itens: tenta achar no texto da descrição
-      if (itens.length === 0 && semAcento(m.descricao).includes(termo)) {
-        out.push({ key: `${m.id}-desc`, nome: m.descricao, qtd: 0, unidade: "un", total: m.valor, precoUnit: null, data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""), varios: true, compra: m });
-      }
-    });
-    return out.sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
-  }, [buscaCompra, historicoCompras]);
 
   // detalhes de uma compra (itens, data, observação e botão para ver a foto da nota)
   const renderDetalhesCompra = (m) => (
