@@ -461,7 +461,13 @@ export default function AdminApp() {
       const { concluido_em: _ignorado, ...semConclusao } = extra;
       ({ data: updated, error } = await tentar(semConclusao));
     }
-    if (error) { showToast("Erro ao atualizar pedido"); console.error(error); return false; }
+    if (error) {
+      console.error(error);
+      // 0 linhas alteradas (sessão expirada / sem permissão / pedido já removido): explica o motivo
+      if (error.code === "PGRST116" || /coerce/i.test(error.message || "")) await avisarFalhaAtualizacao();
+      else showToast(`Erro ao atualizar pedido: ${error.message}`);
+      return false;
+    }
     setPedidos((prev) => prev.map((p) => (p.id === id ? mapPedidoFromDb(updated) : p)));
     showToast(mensagem || `Pedido: ${LABEL_STATUS[status] || status}`);
     return true;
@@ -602,7 +608,7 @@ export default function AdminApp() {
     const { data } = await supabase.auth.getSession();
     showToast(
       data && data.session
-        ? "Não foi possível salvar: o item não existe mais ou você não tem permissão. Atualize a página e tente de novo."
+        ? "Não foi possível salvar: o registro não existe mais ou você não tem permissão. Atualize a página e tente de novo."
         : "Sua sessão expirou. Saia e entre de novo no painel."
     );
   };
