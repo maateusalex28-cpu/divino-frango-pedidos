@@ -455,11 +455,16 @@ export default function AdminApp() {
   const atualizarStatusPedido = async (id, status, extra = {}, mensagem) => {
     const tentar = (patch) => supabase.from("pedidos").update({ status, ...patch }).eq("id", id).select().single();
     let { data: updated, error } = await tentar(extra);
-    // se o banco não tiver a coluna concluido_em, conclui o pedido mesmo assim (só não grava o horário)
-    if (error && "concluido_em" in extra && (error.code === "PGRST204" || /concluido_em/i.test(error.message || ""))) {
-      console.warn("Coluna concluido_em não encontrada em pedidos; concluindo sem gravar o horário de conclusão.");
-      const { concluido_em: _ignorado, ...semConclusao } = extra;
-      ({ data: updated, error } = await tentar(semConclusao));
+    // se o banco ainda não tiver alguma coluna opcional (pronto_em, concluido_em, cancelado_em, motivo_cancelamento),
+    // atualiza o status mesmo assim — só não grava aquele horário/motivo
+    let patch = { ...extra };
+    for (let i = 0; i < 4 && error; i++) {
+      const faltando = Object.keys(patch).find((col) => new RegExp(col, "i").test(error.message || ""));
+      if (!faltando || !(error.code === "PGRST204" || /column|schema cache/i.test(error.message || ""))) break;
+      console.warn(`Coluna ${faltando} não encontrada em pedidos; atualizando o status sem gravar ela.`);
+      const { [faltando]: _ignorado, ...resto } = patch;
+      patch = resto;
+      ({ data: updated, error } = await tentar(patch));
     }
     if (error) {
       console.error(error);
