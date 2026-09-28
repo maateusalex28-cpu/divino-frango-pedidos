@@ -217,7 +217,7 @@ export default function AdminApp() {
   const [funcionarios, setFuncionarios] = useState([]);
   const [bairrosEntrega, setBairrosEntrega] = useState([]);
   const [diarias, setDiarias] = useState([]);
-  const [tab, setTab] = useState("pedidos"); // pedidos | caixa | relatorios | cardapio | config
+  const [tab, setTab] = useState("pedidos"); // pedidos | caixa | compras | relatorios | cardapio | config
   const [toast, setToast] = useState(null);
   const [somAtivo, setSomAtivo] = useState(false);
   const audioCtxRef = useRef(null);
@@ -583,7 +583,12 @@ export default function AdminApp() {
   const cardapioFotoRef = useRef(null);
 
   const cardapioOrdenado = useMemo(
-    () => [...cardapio].sort((a, b) => (a.categoria || "").localeCompare(b.categoria || "") || a.nome.localeCompare(b.nome, "pt-BR")),
+    () => {
+      // mesma ordem de categorias do site do cliente; dentro de cada categoria, fica na sequência em que os itens foram cadastrados
+      const ordemCat = ["Assados", "Acompanhamentos", "Combos", "Bebidas"];
+      const rank = (c) => { const i = ordemCat.indexOf(c || ""); return i === -1 ? ordemCat.length : i; };
+      return [...cardapio].sort((a, b) => rank(a.categoria) - rank(b.categoria));
+    },
     [cardapio]
   );
 
@@ -652,7 +657,9 @@ export default function AdminApp() {
       .eq("id", item.id)
       .select()
       .single();
-    if (!error && updated) setCardapio((prev) => prev.map((c) => (c.id === item.id ? mapCardapioFromDb(updated) : c)));
+    if (error || !updated) { showToast("Não foi possível alterar o produto"); return; }
+    setCardapio((prev) => prev.map((c) => (c.id === item.id ? mapCardapioFromDb(updated) : c)));
+    showToast(updated.disponivel ? `${item.nome} ativado no cardápio` : `${item.nome} desativado — some do cardápio do cliente`);
   };
 
   const removeCardapioItem = async (id) => {
@@ -670,6 +677,9 @@ export default function AdminApp() {
   const [formVendaBalcao, setFormVendaBalcao] = useState({ valor: "", formaPagamento: "Dinheiro", descricao: "" });
   const [formMovimento, setFormMovimento] = useState({ tipo: "suprimento", valor: "", descricao: "" });
   const [comprasRecentes, setComprasRecentes] = useState([]); // últimas compras de todos os turnos (para rever a nota depois)
+  const [historicoCompras, setHistoricoCompras] = useState([]); // todas as compras (para a busca de preço por produto)
+  const [buscaCompra, setBuscaCompra] = useState("");
+  const [carregandoCompras, setCarregandoCompras] = useState(false);
   const [notaVisualizacao, setNotaVisualizacao] = useState(null); // { carregando, url, erro } enquanto a foto da nota está aberta
   const [valorFechamentoForm, setValorFechamentoForm] = useState("");
   const [confirmarFechamento, setConfirmarFechamento] = useState(false);
@@ -699,7 +709,20 @@ export default function AdminApp() {
     }
   };
 
+  const carregarCompras = async () => {
+    setCarregandoCompras(true);
+    try {
+      const { data: compras } = await supabase.from("movimentacoes_caixa").select("*").eq("tipo", "compra").order("created_at", { ascending: false }).limit(1000);
+      setHistoricoCompras((compras || []).map(mapMovFromDb));
+    } catch (e) {
+      showToast("Erro ao carregar as compras");
+    } finally {
+      setCarregandoCompras(false);
+    }
+  };
+
   useEffect(() => {
+    if (tab === "compras") { carregarCaixa(); carregarCompras(); }
     if (tab === "caixa") carregarCaixa();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -735,6 +758,7 @@ export default function AdminApp() {
     if (error) { showToast("Erro ao excluir"); return; }
     setMovimentacoes((prev) => prev.filter((m) => m.id !== id));
     setComprasRecentes((prev) => prev.filter((m) => m.id !== id));
+    setHistoricoCompras((prev) => prev.filter((m) => m.id !== id));
     showToast("Movimentação excluída");
   };
 
@@ -902,6 +926,7 @@ export default function AdminApp() {
         return;
       }
       setComprasRecentes((prev) => [mov, ...prev].slice(0, 30));
+      setHistoricoCompras((prev) => [mov, ...prev]);
       setFormCompra(compraVazia());
       removerNotaSelecionada();
       showToast("Compra lançada");
@@ -1328,6 +1353,39 @@ export default function AdminApp() {
     );
   };
 
+  // busca de preço: procura pelo nome do produto em todas as compras já lançadas
+  const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const resultadosBuscaCompra = useMemo(() => {
+    const termo = semAcento(buscaCompra);
+    if (!termo) return [];
+    const out = [];
+    historicoCompras.forEach((m) => {
+      const itens = m.itens && m.itens.length > 0 ? m.itens : [];
+      itens.forEach((it) => {
+        const nome = it.produto || it.nome || "";
+        if (!semAcento(nome).includes(termo)) return;
+        const qtd = Number(it.quantidade ?? it.qtd ?? 0);
+        const unico = itens.length === 1;
+        out.push({
+          key: `${m.id}-${nome}`,
+          nome,
+          qtd,
+          unidade: it.unidade,
+          total: m.valor,
+          precoUnit: unico && qtd > 0 ? m.valor / qtd : null,
+          data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""),
+          varios: !unico,
+          compra: m,
+        });
+      });
+      // compras antigas sem itens: tenta achar no texto da descrição
+      if (itens.length === 0 && semAcento(m.descricao).includes(termo)) {
+        out.push({ key: `${m.id}-desc`, nome: m.descricao, qtd: 0, unidade: "un", total: m.valor, precoUnit: null, data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""), varios: true, compra: m });
+      }
+    });
+    return out.sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
+  }, [buscaCompra, historicoCompras]);
+
   // detalhes de uma compra (itens, data, observação e botão para ver a foto da nota)
   const renderDetalhesCompra = (m) => (
     <>
@@ -1596,7 +1654,6 @@ export default function AdminApp() {
                   <Wallet size={16} /> Abrir caixa
                 </button>
               </Card>
-              {renderComprasRecentes()}
               </>
             ) : (
               <>
@@ -1666,6 +1723,162 @@ export default function AdminApp() {
                   </button>
                 </Card>
 
+                <Card style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Suprimento (adicionar dinheiro ao caixa)</div>
+                  <input
+                    type="number"
+                    placeholder="Valor (R$)"
+                    value={formMovimento.valor}
+                    onChange={(e) => setFormMovimento((f) => ({ ...f, valor: e.target.value }))}
+                    style={{ ...inputStyle, marginBottom: 8 }}
+                  />
+                  <input
+                    placeholder="Motivo (opcional)"
+                    value={formMovimento.descricao}
+                    onChange={(e) => setFormMovimento((f) => ({ ...f, descricao: e.target.value }))}
+                    style={{ ...inputStyle, marginBottom: 10 }}
+                  />
+                  <button onClick={lancarMovimentoExtra} style={{ ...btnOutline, width: "100%", borderColor: C.green, color: C.green }}>
+                    <ArrowDownCircle size={15} /> Registrar suprimento
+                  </button>
+                </Card>
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Movimentações do turno</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                  {movimentacoes.length === 0 && <EmptyState text="Nenhuma movimentação ainda." />}
+                  {movimentacoes.map((m) => (
+                    <div key={m.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                          {m.tipo === "venda" ? `Venda${m.formaPagamento ? " · " + m.formaPagamento : ""}` : m.tipo === "sangria" ? "Sangria" : m.tipo === "compra" ? "Compra" : "Suprimento"}
+                        </div>
+                        {m.tipo === "compra"
+                          ? renderDetalhesCompra(m)
+                          : m.descricao && <div style={{ fontSize: 11.5, color: C.textSoft }}>{m.descricao}</div>}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: m.tipo === "sangria" || m.tipo === "compra" ? C.red : C.green }}>
+                          {m.tipo === "sangria" || m.tipo === "compra" ? "−" : "+"} {fmt(m.valor)}
+                        </span>
+                        <button onClick={() => removerMovimento(m.id)} style={iconBtnStyle} aria-label="Excluir movimentação"><Trash2 size={14} color={C.textFaint} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <Card style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Fechar caixa</div>
+                  {!confirmarFechamento ? (
+                    <button onClick={() => setConfirmarFechamento(true)} style={{ ...btnOutline, width: "100%" }}>
+                      <Lock size={15} /> Fechar caixa
+                    </button>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 12.5, color: C.textSoft, marginBottom: 10 }}>
+                        Saldo esperado em dinheiro: <b style={{ color: C.text }}>{fmt(totaisCaixa.saldoDinheiro)}</b>. Conte o dinheiro físico e informe abaixo.
+                      </div>
+                      <input
+                        type="number"
+                        placeholder="Valor contado (R$)"
+                        value={valorFechamentoForm}
+                        onChange={(e) => setValorFechamentoForm(e.target.value)}
+                        style={{ ...inputStyle, fontSize: 18, fontWeight: 700, padding: "12px", marginBottom: 10 }}
+                      />
+                      {valorFechamentoForm && (
+                        <div style={{ fontSize: 12.5, marginBottom: 10, color: Number(valorFechamentoForm) === totaisCaixa.saldoDinheiro ? C.green : C.red }}>
+                          Diferença: {fmt(Number(valorFechamentoForm) - totaisCaixa.saldoDinheiro)}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => setConfirmarFechamento(false)} style={{ ...btnOutline, flex: 1 }}>Cancelar</button>
+                        <button onClick={fecharCaixa} style={{ ...btnPrimary, flex: 1, background: C.red, color: "#fff" }}>Confirmar fechamento</button>
+                      </div>
+                    </>
+                  )}
+                </Card>
+
+                {historicoCaixas.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Turnos anteriores</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {historicoCaixas.map((c) => (
+                        <div key={c.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10 }}>
+                          <div style={{ fontSize: 12.5, color: C.textSoft }}>
+                            {new Date(c.abertoEm).toLocaleDateString("pt-BR")} · {new Date(c.abertoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} – {c.fechadoEm ? new Date(c.fechadoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : ""}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
+                            <span style={{ color: C.textSoft }}>Abertura {fmt(c.valorAbertura)} → Fechamento {fmt(c.valorFechamentoInformado || 0)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {tab === "compras" && (
+          <>
+            <Card style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Consultar preço de um produto</div>
+              <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 10 }}>Digite o nome de um produto que você já lançou para ver quanto pagou e quando comprou.</div>
+              <div style={{ position: "relative" }}>
+                <Search size={16} color={C.textFaint} style={{ position: "absolute", left: 12, top: 13 }} />
+                <input
+                  placeholder="Buscar produto (ex: arroz, óleo, frango)"
+                  value={buscaCompra}
+                  onChange={(e) => setBuscaCompra(e.target.value)}
+                  style={{ ...inputStyle, paddingLeft: 36 }}
+                />
+              </div>
+              {buscaCompra.trim() && (
+                <div style={{ marginTop: 12 }}>
+                  {carregandoCompras ? (
+                    <div style={{ textAlign: "center", padding: "12px 0", color: C.textSoft }}><Loader2 size={18} className="spin" /></div>
+                  ) : resultadosBuscaCompra.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: C.textSoft, textAlign: "center", padding: "10px 0" }}>Nenhuma compra encontrada com esse nome.</div>
+                  ) : (
+                    <>
+                      <div style={{ background: C.orangeSoft, border: `1px solid ${C.orange}`, borderRadius: 10, padding: "9px 11px", marginBottom: 10, fontSize: 12.5, color: C.orangeText }}>
+                        Última compra: <b>{resultadosBuscaCompra[0].nome}</b> em <b>{fmtDataSimples(resultadosBuscaCompra[0].data)}</b>
+                        {resultadosBuscaCompra[0].precoUnit != null
+                          ? <> por <b>{fmt(resultadosBuscaCompra[0].precoUnit)}</b>/{rotuloUnidade(resultadosBuscaCompra[0].unidade)}</>
+                          : <> — compra de <b>{fmt(resultadosBuscaCompra[0].total)}</b></>}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {resultadosBuscaCompra.map((r) => (
+                          <div key={r.key} style={{ background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{r.nome}</div>
+                              <div style={{ fontSize: 11.5, color: C.textSoft }}>
+                                {r.qtd > 0 ? `${fmtQtd(r.qtd)} ${rotuloUnidade(r.unidade)} · ` : ""}Comprado em {fmtDataSimples(r.data)}
+                              </div>
+                              {r.varios && <div style={{ fontSize: 11, color: C.textFaint }}>Compra com vários itens: o valor é o total da compra.</div>}
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: C.orangeText }}>
+                                {r.precoUnit != null ? `${fmt(r.precoUnit)}/${rotuloUnidade(r.unidade)}` : fmt(r.total)}
+                              </div>
+                              {r.precoUnit != null && <div style={{ fontSize: 11, color: C.textFaint }}>total {fmt(r.total)}</div>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </Card>
+
+            {!caixaAtual && !carregandoCaixa && (
+              <Card style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Lançar compra</div>
+                <div style={{ fontSize: 12.5, color: C.textSoft }}>Para lançar uma compra nova, abra o caixa primeiro (a compra sai do caixa do turno). A consulta de preços acima funciona sempre.</div>
+              </Card>
+            )}
+            {caixaAtual && (
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Compras</div>
 
@@ -1783,102 +1996,9 @@ export default function AdminApp() {
                     {salvandoCompra ? <Loader2 size={15} className="spin" /> : <ArrowUpCircle size={15} />} {salvandoCompra ? "Salvando…" : "Lançar compra"}
                   </button>
                 </Card>
-
-                <Card style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Suprimento (adicionar dinheiro ao caixa)</div>
-                  <input
-                    type="number"
-                    placeholder="Valor (R$)"
-                    value={formMovimento.valor}
-                    onChange={(e) => setFormMovimento((f) => ({ ...f, valor: e.target.value }))}
-                    style={{ ...inputStyle, marginBottom: 8 }}
-                  />
-                  <input
-                    placeholder="Motivo (opcional)"
-                    value={formMovimento.descricao}
-                    onChange={(e) => setFormMovimento((f) => ({ ...f, descricao: e.target.value }))}
-                    style={{ ...inputStyle, marginBottom: 10 }}
-                  />
-                  <button onClick={lancarMovimentoExtra} style={{ ...btnOutline, width: "100%", borderColor: C.green, color: C.green }}>
-                    <ArrowDownCircle size={15} /> Registrar suprimento
-                  </button>
-                </Card>
-
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Movimentações do turno</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                  {movimentacoes.length === 0 && <EmptyState text="Nenhuma movimentação ainda." />}
-                  {movimentacoes.map((m) => (
-                    <div key={m.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
-                          {m.tipo === "venda" ? `Venda${m.formaPagamento ? " · " + m.formaPagamento : ""}` : m.tipo === "sangria" ? "Sangria" : m.tipo === "compra" ? "Compra" : "Suprimento"}
-                        </div>
-                        {m.tipo === "compra"
-                          ? renderDetalhesCompra(m)
-                          : m.descricao && <div style={{ fontSize: 11.5, color: C.textSoft }}>{m.descricao}</div>}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: m.tipo === "sangria" || m.tipo === "compra" ? C.red : C.green }}>
-                          {m.tipo === "sangria" || m.tipo === "compra" ? "−" : "+"} {fmt(m.valor)}
-                        </span>
-                        <button onClick={() => removerMovimento(m.id)} style={iconBtnStyle} aria-label="Excluir movimentação"><Trash2 size={14} color={C.textFaint} /></button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <Card style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Fechar caixa</div>
-                  {!confirmarFechamento ? (
-                    <button onClick={() => setConfirmarFechamento(true)} style={{ ...btnOutline, width: "100%" }}>
-                      <Lock size={15} /> Fechar caixa
-                    </button>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 12.5, color: C.textSoft, marginBottom: 10 }}>
-                        Saldo esperado em dinheiro: <b style={{ color: C.text }}>{fmt(totaisCaixa.saldoDinheiro)}</b>. Conte o dinheiro físico e informe abaixo.
-                      </div>
-                      <input
-                        type="number"
-                        placeholder="Valor contado (R$)"
-                        value={valorFechamentoForm}
-                        onChange={(e) => setValorFechamentoForm(e.target.value)}
-                        style={{ ...inputStyle, fontSize: 18, fontWeight: 700, padding: "12px", marginBottom: 10 }}
-                      />
-                      {valorFechamentoForm && (
-                        <div style={{ fontSize: 12.5, marginBottom: 10, color: Number(valorFechamentoForm) === totaisCaixa.saldoDinheiro ? C.green : C.red }}>
-                          Diferença: {fmt(Number(valorFechamentoForm) - totaisCaixa.saldoDinheiro)}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => setConfirmarFechamento(false)} style={{ ...btnOutline, flex: 1 }}>Cancelar</button>
-                        <button onClick={fecharCaixa} style={{ ...btnPrimary, flex: 1, background: C.red, color: "#fff" }}>Confirmar fechamento</button>
-                      </div>
-                    </>
-                  )}
-                </Card>
-
-                {renderComprasRecentes()}
-
-                {historicoCaixas.length > 0 && (
-                  <>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Turnos anteriores</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {historicoCaixas.map((c) => (
-                        <div key={c.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10 }}>
-                          <div style={{ fontSize: 12.5, color: C.textSoft }}>
-                            {new Date(c.abertoEm).toLocaleDateString("pt-BR")} · {new Date(c.abertoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} – {c.fechadoEm ? new Date(c.fechadoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : ""}
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
-                            <span style={{ color: C.textSoft }}>Abertura {fmt(c.valorAbertura)} → Fechamento {fmt(c.valorFechamentoInformado || 0)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
             )}
+
+            {renderComprasRecentes()}
           </>
         )}
 
@@ -2080,8 +2200,8 @@ export default function AdminApp() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {cardapioOrdenado.length === 0 && <EmptyState text="Nenhum item no cardápio ainda." />}
               {cardapioOrdenado.map((item) => (
-                <Card key={item.id} style={{ padding: 12 }}>
-                  <div style={{ display: "flex", gap: 10 }}>
+                <Card key={item.id} style={{ padding: 12, borderColor: item.disponivel ? undefined : C.red }}>
+                  <div style={{ display: "flex", gap: 10, opacity: item.disponivel ? 1 : 0.6 }}>
                     {item.fotoUrl ? (
                       <img src={item.fotoUrl} alt={item.nome} style={{ width: 52, height: 52, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
                     ) : (
@@ -2104,12 +2224,18 @@ export default function AdminApp() {
                         <button
                           onClick={() => toggleCardapioDisponivel(item)}
                           style={{
-                            fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 999, border: "none",
-                            background: item.disponivel ? C.greenSoft : C.cardAlt, color: item.disponivel ? C.green : C.textSoft,
+                            fontSize: 12.5, fontWeight: 700, padding: "8px 12px", borderRadius: 10,
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                            border: `1px solid ${item.disponivel ? C.green : C.red}`,
+                            background: item.disponivel ? C.greenSoft : "rgba(248,113,113,0.12)",
+                            color: item.disponivel ? C.green : C.red,
                           }}
                         >
-                          {item.disponivel ? "Disponível" : "Indisponível"}
+                          {item.disponivel ? <><EyeOff size={14} /> Desativar</> : <><Eye size={14} /> Ativar de novo</>}
                         </button>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: item.disponivel ? C.green : C.red }}>
+                          {item.disponivel ? "Ativo no cardápio" : "Desativado (oculto do cliente)"}
+                        </span>
                         {item.categoria && (
                           <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 999, background: C.cardAlt, color: C.textSoft }}>
                             {item.categoria}
@@ -2393,6 +2519,7 @@ export default function AdminApp() {
           {[
             { id: "pedidos", label: "Pedidos", icon: ClipboardList, badge: pedidosPendentes.length },
             { id: "caixa", label: "Caixa", icon: Wallet },
+            { id: "compras", label: "Compras", icon: Package },
             { id: "equipe", label: "Equipe", icon: Users },
             { id: "relatorios", label: "Relatórios", icon: BarChart3 },
             { id: "cardapio", label: "Cardápio", icon: UtensilsCrossed },

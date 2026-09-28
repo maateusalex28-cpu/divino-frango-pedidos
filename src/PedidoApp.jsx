@@ -191,7 +191,7 @@ export default function PedidoApp() {
     (async () => {
       try {
         const [cardapioRes, configRes, bairrosRes] = await Promise.all([
-          supabase.from("cardapio").select("*").eq("disponivel", true).order("categoria", { ascending: true }),
+          supabase.from("cardapio").select("*").eq("disponivel", true).order("created_at", { ascending: true }),
           supabase.from("configuracoes").select("*").eq("id", 1).single(),
           supabase.from("bairros_entrega").select("*").eq("ativo", true),
         ]);
@@ -660,6 +660,31 @@ export default function PedidoApp() {
         }
         @media (max-width: 859px) {
           .df-cart-aside { display: none !important; }
+          html { -webkit-text-size-adjust: 100%; }
+          /* 16px evita o zoom automático do iPhone ao tocar nos campos (nome, telefone, endereço...) */
+          input, select, textarea { font-size: 16px !important; }
+
+          /* cabeçalho e hero mais compactos no celular */
+          .df-hero-wrap { padding-top: 6px !important; }
+          .df-hero-title { font-size: 26px !important; }
+
+          /* cardápio em 2 colunas: dá pra ver mais produtos sem rolar tanto */
+          .df-products-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+          .menu-card-img-wrap { height: 116px !important; }
+          .menu-card-body { padding: 9px 10px 11px !important; }
+          .menu-card-body > div:first-child { font-size: 13.5px !important; }
+          .menu-card-body > div:nth-child(2) { font-size: 11.5px !important; }
+          .menu-card-foot { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; padding-top: 8px !important; }
+          .menu-card-price { font-size: 15px !important; }
+          .menu-card-foot .add-btn { width: 100% !important; height: 40px !important; border-radius: 12px !important; }
+          .menu-card-qty { width: 100% !important; justify-content: space-between !important; }
+          .menu-card-qty .qty-btn { width: 36px !important; height: 36px !important; }
+          .menu-card:hover { transform: none; }
+        }
+        /* telas muito estreitas: volta para 1 coluna para não espremer o conteúdo */
+        @media (max-width: 349px) {
+          .df-products-grid { grid-template-columns: 1fr !important; }
+          .menu-card-img-wrap { height: 150px !important; }
         }
       `}</style>
 
@@ -902,8 +927,8 @@ export default function PedidoApp() {
                               {item.descricao}
                             </div>
                           )}
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 8, gap: 8 }}>
-                            <span className="mono" style={{ fontSize: 16, fontWeight: 700, color: C.orangeText }}>{fmt(item.preco)}</span>
+                          <div className="menu-card-foot" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 8, gap: 8 }}>
+                            <span className="mono menu-card-price" style={{ fontSize: 16, fontWeight: 700, color: C.orangeText }}>{fmt(item.preco)}</span>
                             {lojaFechada ? (
                               <span style={{ fontSize: 11.5, color: C.textFaint, fontWeight: 600 }}>Loja fechada</span>
                             ) : esgotado ? (
@@ -918,7 +943,7 @@ export default function PedidoApp() {
                                 <Plus size={19} color="#0E0E10" />
                               </button>
                             ) : (
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.cardAlt, borderRadius: 999, padding: 3 }}>
+                              <div className="menu-card-qty" style={{ display: "flex", alignItems: "center", gap: 8, background: C.cardAlt, borderRadius: 999, padding: 3 }}>
                                 <button onClick={() => alterarQtd(item.id, -1)} className="qty-btn" style={{ background: C.card, border: "none", borderRadius: 999, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label={`Diminuir ${item.nome}`}>
                                   <Minus size={14} color={C.text} />
                                 </button>
