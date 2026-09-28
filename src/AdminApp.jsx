@@ -597,6 +597,16 @@ export default function AdminApp() {
     setFormCardapio({ nome: item.nome, descricao: item.descricao, preco: String(item.preco), categoria: item.categoria, estoque: item.estoque == null ? "" : String(item.estoque) });
   };
 
+  // quando o Supabase não devolve nenhuma linha no update (sessão expirada, sem permissão ou item já removido)
+  const avisarFalhaAtualizacao = async () => {
+    const { data } = await supabase.auth.getSession();
+    showToast(
+      data && data.session
+        ? "Não foi possível salvar: o item não existe mais ou você não tem permissão. Atualize a página e tente de novo."
+        : "Sua sessão expirou. Saia e entre de novo no painel."
+    );
+  };
+
   const salvarItemCardapio = async (fotoUrlOverride) => {
     if (!formCardapio.nome.trim() || !formCardapio.preco) return;
     const payload = {
@@ -614,8 +624,9 @@ export default function AdminApp() {
         .update(mapCardapioInsert({ ...payload, fotoUrl: fotoUrlOverride ?? atual?.fotoUrl }))
         .eq("id", editandoCardapioId)
         .select()
-        .single();
+        .maybeSingle();
       if (error) { showToast(`Erro ao salvar: ${error.message}`); console.error(error); return; }
+      if (!updated) { await avisarFalhaAtualizacao(); return; }
       setCardapio((prev) => prev.map((c) => (c.id === editandoCardapioId ? mapCardapioFromDb(updated) : c)));
       showToast("Item atualizado");
     } else {
@@ -656,8 +667,9 @@ export default function AdminApp() {
       .update({ disponivel: !item.disponivel })
       .eq("id", item.id)
       .select()
-      .single();
-    if (error || !updated) { showToast("Não foi possível alterar o produto"); return; }
+      .maybeSingle();
+    if (error) { showToast("Não foi possível alterar o produto"); return; }
+    if (!updated) { await avisarFalhaAtualizacao(); return; }
     setCardapio((prev) => prev.map((c) => (c.id === item.id ? mapCardapioFromDb(updated) : c)));
     showToast(updated.disponivel ? `${item.nome} ativado no cardápio` : `${item.nome} desativado — some do cardápio do cliente`);
   };
