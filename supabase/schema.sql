@@ -247,3 +247,7 @@ language sql stable security definer set search_path = public as $$
   select p.id, p.status, p.tipo_entrega, p.total, p.created_at from pedidos p where p.id = p_id;
 $$;
 grant execute on function status_pedido(uuid) to anon, authenticated;
+
+-- ---------- depois deste arquivo ----------
+-- Rode também, nesta ordem: migracao-loja-e-entrega.sql, migracao-contatos.sql e migracao-seguranca.sql
+-- (a última fecha o acesso: painel só para administradores, pedidos e cupons fora do alcance público).

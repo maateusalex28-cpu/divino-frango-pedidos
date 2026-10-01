@@ -287,9 +287,24 @@ O banco usa as estruturas criadas pela migração da rodada 2 (executada à part
 - O site grava nome + WhatsApp assim que a pessoa preenche os dois no checkout, mesmo se ela desistir, e marca "fez pedido" quando envia.
 - No painel: busca, filtros (todos / fizeram pedido / não finalizaram pedido), botão para abrir a conversa e botão **Excel** que baixa a lista filtrada em `.csv`.
 
-## Segurança: pedidos só visíveis no painel
+## Segurança (rode por último)
 
-**Rode no SQL Editor do Supabase (depois do site novo publicado):** [`supabase/migracao-seguranca-pedidos.sql`](./supabase/migracao-seguranca-pedidos.sql). Antes dele, qualquer pessoa com a chave pública do site conseguia ler nome, telefone e endereço de todos os pedidos. Depois, só o painel logado lê a tabela `pedidos`; o site grava o pedido com um id gerado no navegador e acompanha o status pela função `status_pedido` (consulta a cada 10 segundos).
+**Rode no SQL Editor do Supabase, depois das outras migrações:** [`supabase/migracao-seguranca.sql`](./supabase/migracao-seguranca.sql). Ordem completa: `migracao-loja-e-entrega.sql` -> `migracao-contatos.sql` -> `migracao-seguranca.sql`.
+
+O que ele fecha:
+- **Painel só para administradores** (tabela `admins`). Antes, qualquer pessoa que criasse conta tinha acesso total. Quem já existe em Authentication -> Users vira administrador ao rodar o arquivo.
+- **Pedidos e cupons fora do alcance público.** O cliente acompanha o próprio pedido pela função `status_pedido` e valida cupom por `validar_cupom`.
+- **Pedido recalculado pelo banco** (preço, taxa, desconto, total e status), recusando item esgotado, bairro fora da área e cupom inválido. Estoque e uso de cupom são baixados pelo banco; `decrementar_estoque` e `usar_cupom` não podem mais ser chamadas de fora.
+- **Todas as tabelas** com proteção ligada e regras antigas removidas; notas fiscais só pelo painel.
+
+**Depois de rodar, no painel do Supabase:**
+1. Authentication -> Sign In / Providers: desligue **"Allow new users to sign up"**.
+2. Authentication -> Users: confira se só há pessoas da loja (apague desconhecidos e rode o arquivo de novo).
+
+Novo administrador no futuro (depois de criar o usuário em Authentication -> Users -> Add user):
+```sql
+insert into admins (user_id) select id from auth.users where email = email@da.pessoa;
+```
 
 ## O que já foi verificado
 

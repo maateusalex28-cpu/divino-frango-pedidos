@@ -392,6 +392,19 @@ export default function PedidoApp() {
     setCupomErro("");
     setBuscandoCupom(true);
     try {
+      // validar_cupom só confirma UM código (a lista de cupons não é pública); se a função
+      // ainda não existir no banco, usa a consulta antiga
+      const rpc = await supabase.rpc("validar_cupom", { p_codigo: cupomInput.trim() });
+      if (!rpc.error) {
+        const valido = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+        if (!valido) {
+          setCupomErro("Cupom inválido, expirado ou esgotado.");
+          return;
+        }
+        setCupomAplicado({ codigo: valido.codigo, tipo: valido.tipo, valor: Number(valido.valor) });
+        setCupomInput("");
+        return;
+      }
       const { data, error } = await supabase.from("cupons").select("*").ilike("codigo", cupomInput.trim()).maybeSingle();
       if (error || !data) {
         setCupomErro("Cupom não encontrado.");
@@ -531,7 +544,8 @@ export default function PedidoApp() {
         forma_pagamento: form.formaPagamento,
         precisa_troco: form.formaPagamento === "Dinheiro" ? form.precisaTroco : false,
         troco_para: form.formaPagamento === "Dinheiro" && form.precisaTroco && form.trocoPara ? Number(form.trocoPara) : null,
-        itens: itensCarrinho.map(({ item, qtd }) => ({ nome: item.nome, preco: item.preco, qtd })),
+        // o id do item permite ao banco conferir o preço pelo cardápio (o banco recalcula o total)
+        itens: itensCarrinho.map(({ item, qtd }) => ({ id: item.id, nome: item.nome, preco: item.preco, qtd })),
         subtotal: subtotalCarrinho,
         taxa_entrega: taxaAplicada,
         cupom_codigo: cupomAplicado?.codigo || null,
@@ -566,7 +580,12 @@ export default function PedidoApp() {
         setErro("");
         setTela("cardapio");
       } else {
-        setErro("Não foi possível enviar o pedido. Tente novamente.");
+        // mensagens das conferências do banco (estoque, bairro, cupom) viram avisos claros
+        const msg = String(e?.message || "");
+        if (/Estoque insuficiente|indisponível/i.test(msg)) setErro("Um dos itens acabou de esgotar. Atualize a página e confira seu pedido.");
+        else if (/Bairro fora/i.test(msg)) setErro("Esse bairro ainda não está na nossa área de entrega. Escolha outro bairro ou retirada.");
+        else if (/Cupom inválido/i.test(msg)) setErro("O cupom não é mais válido. Remova o cupom e tente de novo.");
+        else setErro("Não foi possível enviar o pedido. Tente novamente.");
       }
     } finally {
       setEnviando(false);
