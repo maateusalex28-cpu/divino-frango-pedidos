@@ -215,3 +215,26 @@ alter table pedidos add column if not exists data_pedido date;
 -- ---------- cupom visível no site / aceite automático de pedidos ----------
 alter table configuracoes add column if not exists cupom_ativo boolean not null default true;
 alter table configuracoes add column if not exists aceitar_pedidos_automatico boolean not null default false;
+
+-- ---------- loja aberta/fechada e tempo de entrega (igual a supabase/migracao-loja-e-entrega.sql) ----------
+alter table configuracoes add column if not exists loja_fechada boolean not null default false;
+alter table configuracoes add column if not exists mensagem_loja_fechada text;
+alter table configuracoes add column if not exists tempo_entrega_min integer not null default 40;
+alter table configuracoes add column if not exists tempo_entrega_max integer not null default 60;
+alter table configuracoes add column if not exists mostrar_tempo_entrega boolean not null default false;
+
+-- proteção no banco: com a loja fechada no painel, nenhum pedido novo entra,
+-- mesmo que o cliente esteja com o site aberto há horas sem recarregar
+create or replace function bloquear_pedido_loja_fechada()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from configuracoes where id = 1 and loja_fechada) then
+    raise exception 'Loja fechada: pedidos pausados no momento.';
+  end if;
+  return new;
+end; $$;
+
+drop trigger if exists pedidos_bloqueia_loja_fechada on pedidos;
+create trigger pedidos_bloqueia_loja_fechada
+  before insert on pedidos
+  for each row execute function bloquear_pedido_loja_fechada();

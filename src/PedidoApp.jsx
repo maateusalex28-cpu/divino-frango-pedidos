@@ -1,5 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Plus, Minus, ShoppingCart, Check, Store, Bike, ChevronLeft, ChevronRight, Loader2, UtensilsCrossed, Clock, ClipboardCheck, CircleDashed, Trash2, CreditCard, User, Phone } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  Plus, Minus, Check, Store, Bike, ChevronLeft, Loader2, UtensilsCrossed, Clock, ClipboardCheck, CircleDashed, Trash2,
+  CreditCard, User, Flame, Soup, Gift, CupSoda, Drumstick, Utensils, ShoppingBag, ArrowRight, Timer, Wallet, CalendarClock, BadgeCheck,
+} from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { LOGO_URL } from "./logo";
 
@@ -19,14 +22,18 @@ const FOTO_FRANGO_PRODUTO = fotoFrangoProdutoAsset;
 // imagens padrão (fallback) para produtos comuns que ainda não têm foto cadastrada no /admin.
 // só é usada quando o produto NÃO tem foto_url no Supabase — nunca substitui uma imagem já cadastrada.
 const IMAGENS_PADRAO_PRODUTO = [
+  // (removidas as fotos de farofa, linguiça e coxa, que davam 404, e a de maionese, que mostrava outro prato;
+  // a lata de Coca agora só aparece para Coca, nunca para outro refrigerante)
   { match: /frango/i, url: FOTO_FRANGO_PRODUTO },
   { match: /arroz/i, url: "https://images.unsplash.com/photo-1625980319455-985e5442c5ae?auto=format&fit=crop&w=600&q=75" },
-  { match: /farofa/i, url: "https://images.unsplash.com/photo-1626200926749-3477d5b2a2c1?auto=format&fit=crop&w=600&q=75" },
-  { match: /maionese/i, url: "https://images.unsplash.com/photo-1541014741259-de529411b96a?auto=format&fit=crop&w=600&q=75" },
-  { match: /lingui[cç]a/i, url: "https://images.unsplash.com/photo-1690983323313-bc38e2f2f4f2?auto=format&fit=crop&w=600&q=75" },
-  { match: /(coxa|sobrecoxa)/i, url: "https://images.unsplash.com/photo-1598515213692-5f252f0d4f9a?auto=format&fit=crop&w=600&q=75" },
-  { match: /(coca|refrigerante|guaran[aá]|bebida)/i, url: "https://images.unsplash.com/photo-1554866585-cd94860890b7?auto=format&fit=crop&w=600&q=75" },
+  { match: /coca/i, url: "https://images.unsplash.com/photo-1554866585-cd94860890b7?auto=format&fit=crop&w=600&q=75" },
 ];
+// fotos do Supabase Storage chegam como PNG de 2-3 MB. Pedimos uma versão reduzida (WebP na largura
+// certa) pelo serviço de transformação de imagens do Supabase; se ele falhar, a tela cai para a original.
+const SUPABASE_OBJ = "/storage/v1/object/public/";
+const fotoOtimizada = (url, largura) =>
+  url && url.includes(SUPABASE_OBJ) ? `${url.replace(SUPABASE_OBJ, "/storage/v1/render/image/public/")}?width=${largura}&height=${largura}&resize=contain&quality=72` : url;
+
 const imagemPadraoProduto = (nome) => {
   const achado = IMAGENS_PADRAO_PRODUTO.find((i) => i.match.test(nome || ""));
   return achado ? achado.url : null;
@@ -53,11 +60,35 @@ const telefoneCompleto = (valor) => {
   return digitos.length === 10 || digitos.length === 11;
 };
 
-const DIAS_SEMANA = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 
 // categorias oficiais do cardápio, nesta ordem exata
 const CATEGORIAS_ORDEM = ["Assados", "Acompanhamentos", "Combos", "Bebidas"];
-const CATEGORIA_EMOJI = { Assados: "🔥", Acompanhamentos: "🍚", Combos: "🎁", Bebidas: "🥤" };
+const CATEGORIA_ICONE = { Assados: Flame, Acompanhamentos: Soup, Combos: Gift, Bebidas: CupSoda };
+
+// WhatsApp da loja para dúvidas (abre a conversa já com uma mensagem pronta)
+const WHATSAPP_NUMERO = "5547997050828";
+const WHATSAPP_EXIBICAO = "(47) 99705-0828";
+const LINK_WHATSAPP = `https://wa.me/${WHATSAPP_NUMERO}?text=${encodeURIComponent("Olá! Vim pelo site do Divino Frango e tenho uma dúvida.")}`;
+
+// marca oficial do WhatsApp (caminho do Simple Icons, simpleicons.org); o lucide não tem logos de marcas
+const IconeWhatsApp = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
+  </svg>
+);
+
+// título do topo, palavra por palavra (cada uma entra com um pequeno atraso)
+const TITULO_HERO = "Frango assado na hora, do jeito que só o Divino faz."
+  .split(" ")
+  .map((texto, i) => ({ texto, destaque: i >= 4 }));
+
+// fagulhas de brasa subindo na foto do topo (posição %, tamanho px, atraso s, duração s, desvio lateral px)
+const BRASAS = [
+  { x: 6, s: 4, d: 0, t: 5.2, dx: 14 }, { x: 14, s: 3, d: 1.8, t: 6.1, dx: -10 }, { x: 22, s: 5, d: 3.1, t: 4.8, dx: 18 },
+  { x: 31, s: 3, d: 0.9, t: 5.7, dx: -16 }, { x: 39, s: 4, d: 2.6, t: 6.4, dx: 12 }, { x: 47, s: 2, d: 4.2, t: 5.1, dx: -8 },
+  { x: 55, s: 4, d: 1.3, t: 5.9, dx: 20 }, { x: 63, s: 3, d: 3.7, t: 4.6, dx: -14 }, { x: 71, s: 5, d: 0.4, t: 6.6, dx: 10 },
+  { x: 79, s: 3, d: 2.2, t: 5.3, dx: -18 }, { x: 87, s: 4, d: 4.6, t: 6.0, dx: 8 }, { x: 94, s: 2, d: 1.5, t: 4.9, dx: -12 },
+];
 // itens sem categoria (ou marcados como "Outros") não ganham aba nem título "Outros" para o cliente:
 // aparecem só na aba "Todos", no topo, sem título — assim nenhum produto some do cardápio
 const SEM_CATEGORIA = "__sem_categoria__";
@@ -83,23 +114,16 @@ const categoriaDoItem = (item) => {
   return ALIAS_CATEGORIA[chave] || item.categoria.trim();
 };
 
-// resumo legível dos dias/horários em que a loja funciona
-const resumoHorarios = (horarios) => {
-  if (!horarios) return "";
-  const abertos = [0, 1, 2, 3, 4, 5, 6].filter((d) => horarios[d]?.aberto);
-  if (abertos.length === 0) return "Nenhum horário configurado no momento.";
-  return abertos.map((d) => `${DIAS_SEMANA[d]}, das ${horarios[d].abre} às ${horarios[d].fecha}`).join(" · ");
-};
-
 const C = {
-  bg: "#0E0E10",
-  card: "rgba(20,20,22,0.88)",
-  cardAlt: "#201F23",
-  border: "#2C2B30",
-  borderSoft: "#242327",
-  text: "#F5F5F7",
-  textSoft: "#A4A3AA",
-  textFaint: "#6E6D74",
+  bg: "#0F0D0C",
+  card: "#181513",
+  cardAlt: "#24201D",
+  border: "#38312C",
+  borderSoft: "#27221F",
+  text: "#F7F2EC",
+  textSoft: "#B8AFA6",
+  textFaint: "#8C8279",
+  ink: "#140F0C",
   orange: "#F5940A",
   orangeSoft: "rgba(245,148,10,0.14)",
   orangeText: "#FFB648",
@@ -131,18 +155,8 @@ const mapPedidoFromDb = (r) => ({
 const ETAPAS = ["pendente", "aceito", "preparando", "pronto", "concluido"];
 
 const inputStyle = {
-  width: "100%", padding: "12px 12px", borderRadius: 10, border: `1px solid ${C.border}`,
-  background: C.cardAlt, color: C.text, fontSize: 15,
-};
-
-const btnPrimary = {
-  background: C.orange, color: "#0E0E10", border: "none", borderRadius: 12, padding: "14px",
-  fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
-};
-
-const btnOutline = {
-  background: "transparent", color: C.text, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px",
-  fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+  width: "100%", padding: "13px 14px", borderRadius: 12, border: `1px solid ${C.border}`,
+  background: C.cardAlt, color: C.text, fontSize: 15, transition: "border-color .15s ease, box-shadow .15s ease",
 };
 
 // mantidas as opções de Cartão Crédito/Débito já existentes (o pedido só renomeou "Pix" para "Pix pela maquininha";
@@ -560,572 +574,550 @@ export default function PedidoApp() {
     return () => supabase.removeChannel(canal);
   }, [pedidoAtual?.id, tela]);
 
+  // vitrine do topo: frangos e combos com foto cadastrada, passando sozinhos como "stories"
+  const slidesHero = useMemo(() => {
+    const comFoto = cardapio.filter((i) => i.fotoUrl && !(i.estoque != null && i.estoque <= 0));
+    const frangos = comFoto.filter((i) => categoriaDoItem(i) === "Assados" && /frango/i.test(i.nome));
+    const combos = comFoto.filter((i) => categoriaDoItem(i) === "Combos");
+    return [...frangos, ...combos].slice(0, 4);
+  }, [cardapio]);
+  const [slide, setSlide] = useState(0);
+  const [fotosOriginais, setFotosOriginais] = useState({}); // { [itemId]: true } quando a versão reduzida falhou
+
+  useEffect(() => {
+    if (slidesHero.length < 2) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    // "slide" nas dependências: tocar numa barrinha reinicia a contagem
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") setSlide((s) => (s + 1) % slidesHero.length);
+    }, 5200);
+    return () => clearInterval(t);
+  }, [slidesHero.length, slide]);
+
+  // sugestões para completar o pedido (acompanhamentos e bebidas que ainda não estão no carrinho)
+  const sugestoes = useMemo(
+    () =>
+      cardapio
+        .filter((i) => ["Acompanhamentos", "Bebidas"].includes(categoriaDoItem(i)) && !carrinho[i.id] && !(i.estoque != null && i.estoque <= 0))
+        .slice(0, 6),
+    [cardapio, carrinho]
+  );
+
+  const menuRef = useRef(null);
+  const [toast, setToast] = useState(null); // { nome, k } aviso rápido de "adicionado"
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 1800);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   if (!loaded) {
     return (
-      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", color: C.textSoft, fontFamily: "'DM Sans', sans-serif" }}>
-        <Loader2 size={22} style={{ marginRight: 10 }} className="spin-loader" />
-        Carregando cardápio…
-        <style>{`.spin-loader { animation: spin-loader 1s linear infinite; } @keyframes spin-loader { to { transform: rotate(360deg); } }`}</style>
+      <div className="df-loading">
+        <style>{CSS}</style>
+        <div className="df-loading-inner">
+          <img src={LOGO_URL} alt="" width={64} height={64} />
+          <div className="sk sk-title" />
+          <div className="sk sk-line" />
+          <div className="sk-grid">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="sk sk-card" />)}
+          </div>
+        </div>
       </div>
     );
   }
 
-  const telaComHero = tela === "cardapio";
   const tempoEntregaVisivel = tempoEntrega.mostrar && tempoEntrega.min > 0 && tempoEntrega.max >= tempoEntrega.min;
-  const textoTempoEntrega =
-    tempoEntrega.min === tempoEntrega.max
-      ? `Tempo estimado de entrega: ${tempoEntrega.min} min`
-      : `Tempo estimado de entrega: ${tempoEntrega.min}–${tempoEntrega.max} min`;
+  const faixaTempo = tempoEntrega.min === tempoEntrega.max ? `${tempoEntrega.min} min` : `${tempoEntrega.min} a ${tempoEntrega.max} min`;
+  const textoTempoEntrega = `Tempo estimado de entrega: ${faixaTempo}`;
   const mostrarBarraCarrinho = tela === "cardapio" && qtdItensCarrinho > 0 && !lojaFechada;
 
+  // selo de status no cabeçalho: aberto até X, fecha em N min, encomendas ou fechado
+  const statusSelo = (() => {
+    if (lojaFechada) return { tom: "off", texto: "Fechado agora" };
+    if (!horarios) return null;
+    const cfgHoje = horarios[new Date().getDay()];
+    if (statusLoja.aberta && cfgHoje?.fecha) {
+      const [h, m] = cfgHoje.fecha.split(":").map(Number);
+      const fim = new Date();
+      fim.setHours(h, m, 0, 0);
+      const faltam = Math.round((fim.getTime() - Date.now()) / 60000);
+      if (faltam > 0 && faltam <= 60) return { tom: "urgente", texto: `Fecha em ${faltam} min` };
+      return { tom: "on", texto: `Aberto até ${cfgHoje.fecha}` };
+    }
+    return proximosDiasAbertos.length > 0 ? { tom: "agenda", texto: "Aceitando encomendas" } : { tom: "off", texto: "Fechado agora" };
+  })();
+
+  const fotoDe = (item, largura = 480) => {
+    if (imagensQuebradas[item.id]) return null;
+    const original = item.fotoUrl || imagemPadraoProduto(item.nome);
+    return fotosOriginais[item.id] ? original : fotoOtimizada(original, largura);
+  };
+  // 1º erro: tenta a foto original (sem redução); 2º erro: mostra o ícone no lugar
+  const marcarQuebrada = (item) => {
+    const original = item.fotoUrl || imagemPadraoProduto(item.nome);
+    if (!fotosOriginais[item.id] && fotoOtimizada(original, 1) !== original) setFotosOriginais((m) => ({ ...m, [item.id]: true }));
+    else setImagensQuebradas((m) => ({ ...m, [item.id]: true }));
+  };
+
+  const adicionar = (item) => {
+    alterarQtd(item.id, 1);
+    setToast({ nome: item.nome, k: Date.now() });
+  };
+
+  const irParaCardapio = () => {
+    const reduzir = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    menuRef.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" });
+  };
+
+  const renderFoto = (item, className, largura) => {
+    const foto = fotoDe(item, largura);
+    const esgotado = item.estoque != null && item.estoque <= 0;
+    const Icone = CATEGORIA_ICONE[categoriaDoItem(item)] || Drumstick;
+    return foto ? (
+      <img
+        src={foto}
+        alt={item.nome}
+        loading="lazy"
+        decoding="async"
+        onError={() => marcarQuebrada(item)}
+        className={`${className}${esgotado ? " is-esgotado" : ""}`}
+      />
+    ) : (
+      <div className={`${className} ph`} aria-hidden="true">
+        <Icone size={30} strokeWidth={1.6} />
+      </div>
+    );
+  };
+
+  // botão de adicionar ou seletor de quantidade, conforme o item já esteja no carrinho
+  const renderAcao = (item, grande = false) => {
+    const qtd = carrinho[item.id] || 0;
+    const esgotado = item.estoque != null && item.estoque <= 0;
+    const limiteAtingido = item.estoque != null && qtd >= item.estoque;
+    if (lojaFechada) return <span className="acao-off">Loja fechada</span>;
+    if (esgotado) return <span className="acao-off">Esgotado</span>;
+    if (qtd === 0) {
+      return grande ? (
+        <button className="btn btn-primary btn-lg" onClick={() => adicionar(item)}>
+          <Plus size={18} strokeWidth={2.4} /> Adicionar
+        </button>
+      ) : (
+        <button className="add-fab" onClick={() => adicionar(item)} aria-label={`Adicionar ${item.nome}`}>
+          <Plus size={20} strokeWidth={2.4} />
+        </button>
+      );
+    }
+    return (
+      <div className={`stepper${grande ? " stepper-lg" : ""}`}>
+        <button onClick={() => alterarQtd(item.id, -1)} aria-label={`Diminuir ${item.nome}`}>
+          <Minus size={grande ? 16 : 14} strokeWidth={2.4} />
+        </button>
+        <span key={qtd} className="qty-pop">{qtd}</span>
+        <button
+          onClick={() => !limiteAtingido && alterarQtd(item.id, 1)}
+          disabled={limiteAtingido}
+          className="is-plus"
+          aria-label={`Aumentar ${item.nome}`}
+        >
+          <Plus size={grande ? 16 : 14} strokeWidth={2.4} />
+        </button>
+      </div>
+    );
+  };
+
+  const seloEstoque = (item) => {
+    if (item.estoque == null || item.estoque <= 0 || item.estoque > 5) return null;
+    return <span className="selo-estoque">{item.estoque === 1 ? "Última unidade" : `Só restam ${item.estoque}`}</span>;
+  };
+
+  const labelStyle = { fontSize: 13, fontWeight: 600, color: C.textSoft, marginBottom: 6, display: "block" };
+
+  const linhaCarrinho = (item, qtd, compacto) => {
+    const limite = item.estoque != null && qtd >= item.estoque;
+    return (
+      <div key={item.id} className={`cart-row${compacto ? " is-compact" : ""}`}>
+        {renderFoto(item, "cart-thumb", 160)}
+        <div className="cart-row-info">
+          <div className="cart-row-nome">{item.nome}</div>
+          <div className="cart-row-preco num">{fmt(item.preco * qtd)}</div>
+        </div>
+        <div className="stepper stepper-sm">
+          <button onClick={() => alterarQtd(item.id, -1)} aria-label={`Diminuir ${item.nome}`}>
+            {qtd === 1 ? <Trash2 size={13} /> : <Minus size={13} strokeWidth={2.4} />}
+          </button>
+          <span key={qtd} className="qty-pop">{qtd}</span>
+          <button onClick={() => !limite && alterarQtd(item.id, 1)} disabled={limite} className="is-plus" aria-label={`Aumentar ${item.nome}`}>
+            <Plus size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const blocoSugestoes = sugestoes.length > 0 && !lojaFechada && (
+    <div className="sugestoes">
+      <div className="sugestoes-titulo">Combina com seu pedido</div>
+      <div className="sugestoes-scroll no-scrollbar">
+        {sugestoes.map((item) => (
+          <div key={item.id} className="sug-card">
+            {renderFoto(item, "sug-img", 320)}
+            <div className="sug-nome">{item.nome}</div>
+            <div className="sug-foot">
+              <span className="num">{fmt(item.preco)}</span>
+              <button className="add-fab add-fab-sm" onClick={() => adicionar(item)} aria-label={`Adicionar ${item.nome}`}>
+                <Plus size={16} strokeWidth={2.6} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const indiceSlide = slidesHero.length ? slide % slidesHero.length : 0;
+  const slideAtual = slidesHero[indiceSlide] || null;
+
   return (
-    <>
-      {/* Camada de fundo (frango assado) — elemento próprio com position:"fixed" cobrindo
-          sempre 100% da viewport, ATRÁS de tudo (zIndex -1). Isso é diferente e muito mais
-          confiável do que usar a propriedade CSS "background-attachment: fixed" no próprio
-          container de conteúdo: essa propriedade tem suporte instável entre navegadores
-          (falha silenciosamente em vários casos), o que fazia a foto aparecer só numa faixa
-          do topo e ficar preta embaixo. Um elemento com position:"fixed" não depende dessa
-          propriedade e funciona de forma consistente em desktop e mobile. */}
-      {telaComHero && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: -1,
-            pointerEvents: "none",
-            backgroundColor: C.bg,
-            backgroundImage: `linear-gradient(180deg, rgba(10,10,12,0.32) 0%, rgba(10,10,12,0.44) 45%, rgba(10,10,12,0.56) 100%), url(${BG_FRANGO_URL})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center top",
-            backgroundRepeat: "no-repeat",
-          }}
-        />
-      )}
-      <div
-        style={{
-          position: "relative",
-          minHeight: "100vh",
-          backgroundColor: telaComHero ? "transparent" : C.bg,
-          fontFamily: "'DM Sans', sans-serif",
-          color: C.text,
-          paddingBottom: mostrarBarraCarrinho ? "calc(112px + env(safe-area-inset-bottom, 0px))" : 24,
-        }}
-      >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
-        * { box-sizing: border-box; }
-        body { -webkit-tap-highlight-color: transparent; }
-        input, select, textarea, button { font-family: 'DM Sans', sans-serif; }
-        button { cursor: pointer; }
-        .mono { font-family: 'DM Mono', monospace; }
-        .display { font-family: 'Sora', sans-serif; }
-        ::placeholder { color: ${C.textFaint}; }
-        .spin-loader { animation: spin-loader 1s linear infinite; }
-        @keyframes spin-loader { to { transform: rotate(360deg); } }
-        .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .cat-pill { transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
-        .cat-pill:active { transform: scale(0.96); }
-        .add-btn, .qty-btn { transition: transform 0.12s ease, background 0.12s ease; }
-        .add-btn:active, .qty-btn:active { transform: scale(0.88); }
-        .qty-pop { animation: qty-pop 0.22s ease; }
-        @keyframes qty-pop { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
-        .cart-bar-in { animation: cart-bar-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1); }
-        @keyframes cart-bar-in { 0% { transform: translateY(10px) scale(0.97); opacity: 0.5; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
-        .menu-card { transition: transform 0.12s ease, border-color 0.12s ease; }
-        .menu-card:hover { transform: translateY(-3px); border-color: ${C.orange}; }
+    <div className={`df-app${mostrarBarraCarrinho ? " has-cartbar" : ""}`}>
+      <style>{CSS}</style>
 
-        /* ===== Redesign responsivo (desktop) ===== */
-        @media (min-width: 860px) {
-          .df-header-inner, .df-hero-wrap, .df-content-wrap { max-width: 1180px !important; }
-          .df-hero-wrap { padding-top: 68px !important; padding-bottom: 8px !important; }
-          .df-hero-title { font-size: 48px !important; }
-          .df-hero-sub { font-size: 16px !important; }
-          .df-cat-scroll { flex-wrap: wrap !important; overflow-x: visible !important; justify-content: center !important; }
-          .df-main-grid { display: grid !important; grid-template-columns: 1fr 360px !important; gap: 32px !important; align-items: start !important; }
-          .df-products-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important; gap: 20px !important; }
-          .menu-card-img-wrap { height: 168px !important; }
-          .menu-card-body { padding: 14px 14px 16px !important; }
-          .df-cart-aside { display: block !important; position: sticky !important; top: 88px !important; }
-          .df-checkout-aside { position: sticky !important; top: 88px !important; }
-          .df-floating-cart-mobile { display: none !important; }
-          .df-benefits { flex-direction: row !important; }
-          .df-benefit-item { flex: 1 !important; border-top: none !important; border-left: 1px solid ${C.borderSoft} !important; }
-          .df-benefit-item:first-child { border-left: none !important; }
-        }
-        @media (max-width: 859px) {
-          .df-cart-aside { display: none !important; }
-          html { -webkit-text-size-adjust: 100%; }
-          /* 16px evita o zoom automático do iPhone ao tocar nos campos (nome, telefone, endereço...) */
-          input, select, textarea { font-size: 16px !important; }
-
-          /* cabeçalho e hero mais compactos no celular */
-          .df-hero-wrap { padding-top: 6px !important; }
-          .df-hero-title { font-size: 26px !important; }
-
-          /* cardápio em 2 colunas: dá pra ver mais produtos sem rolar tanto */
-          .df-products-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
-          .menu-card-img-wrap { height: 116px !important; }
-          .menu-card-body { padding: 9px 10px 11px !important; }
-          .menu-card-body > div:first-child { font-size: 13.5px !important; }
-          .menu-card-body > div:nth-child(2) { font-size: 11.5px !important; }
-          .menu-card-foot { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; padding-top: 8px !important; }
-          .menu-card-price { font-size: 15px !important; }
-          .menu-card-foot .add-btn { width: 100% !important; height: 40px !important; border-radius: 12px !important; }
-          .menu-card-qty { width: 100% !important; justify-content: space-between !important; }
-          .menu-card-qty .qty-btn { width: 36px !important; height: 36px !important; }
-          .menu-card:hover { transform: none; }
-        }
-        /* telas muito estreitas: volta para 1 coluna para não espremer o conteúdo */
-        @media (max-width: 349px) {
-          .df-products-grid { grid-template-columns: 1fr !important; }
-          .menu-card-img-wrap { height: 150px !important; }
-        }
-      `}</style>
-
-      {/* Header */}
-      <div
-        style={{
-          background: telaComHero ? "rgba(14,14,16,0.35)" : C.card,
-          backdropFilter: telaComHero ? "blur(6px)" : "none",
-          WebkitBackdropFilter: telaComHero ? "blur(6px)" : "none",
-          borderBottom: telaComHero ? "none" : `1px solid ${C.border}`,
-          padding: telaComHero ? "22px 20px 18px" : "16px 20px",
-          position: telaComHero ? "relative" : "sticky",
-          top: 0,
-          zIndex: 20,
-        }}
-      >
-        <div className="df-header-inner" style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+      {/* Cabeçalho fixo */}
+      <header className="df-header">
+        <div className="df-wrap df-header-inner">
+          <div className="df-brand">
             {tela !== "cardapio" && tela !== "confirmado" ? (
-              <button
-                onClick={() => setTela(tela === "checkout" ? "carrinho" : "cardapio")}
-                style={{ background: C.cardAlt, border: "none", borderRadius: 10, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-                aria-label="Voltar"
-              >
-                <ChevronLeft size={18} color={C.text} />
+              <button className="icon-btn" onClick={() => setTela(tela === "checkout" ? "carrinho" : "cardapio")} aria-label="Voltar">
+                <ChevronLeft size={20} />
               </button>
             ) : (
-              <img
-                src={LOGO_URL}
-                alt="Divino Frango"
-                style={{
-                  width: telaComHero ? 52 : 36,
-                  height: telaComHero ? 52 : 36,
-                  objectFit: "contain",
-                  borderRadius: 12,
-                  boxShadow: telaComHero ? "0 4px 16px rgba(0,0,0,0.5)" : "none",
-                  flexShrink: 0,
-                }}
-              />
+              <img src={LOGO_URL} alt="Divino Frango" width={40} height={40} className="df-logo" />
             )}
             <div style={{ minWidth: 0 }}>
-              <div className="display" style={{ fontSize: telaComHero ? 22 : 16, fontWeight: 800, letterSpacing: 0.2, textShadow: telaComHero ? "0 2px 10px rgba(0,0,0,0.7)" : "none" }}>
+              <div className="df-brand-nome">
                 {tela === "carrinho" ? "Meu pedido" : tela === "checkout" ? "Finalizar pedido" : tela === "acompanhar" ? "Seu pedido" : "Divino Frango"}
               </div>
-              {telaComHero && (
-                <div style={{ fontSize: 12.5, color: C.orangeText, fontWeight: 700, marginTop: 1, textShadow: "0 1px 6px rgba(0,0,0,0.7)" }}>
-                  O sabor que conquista
+              {tela === "cardapio" && statusSelo && (
+                <div className={`status-selo is-${statusSelo.tom}`}>
+                  <span className="status-ponto" aria-hidden="true" />
+                  {statusSelo.texto}
                 </div>
               )}
             </div>
           </div>
 
-          {telaComHero && qtdItensCarrinho > 0 && (
+          {tela === "cardapio" && qtdItensCarrinho > 0 && (
             <button
+              key={cartBump}
               onClick={() => setTela("carrinho")}
+              className="cart-btn bump"
               aria-label={`Ver carrinho, ${qtdItensCarrinho} ${qtdItensCarrinho === 1 ? "item" : "itens"}`}
-              style={{
-                position: "relative", flexShrink: 0,
-                background: "rgba(14,14,16,0.55)", border: `1px solid rgba(255,255,255,0.14)`,
-                borderRadius: 999, width: 42, height: 42, display: "flex", alignItems: "center", justifyContent: "center",
-                backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
-              }}
             >
-              <ShoppingCart size={19} color={C.text} />
-              <span
-                className="mono"
-                style={{
-                  position: "absolute", top: -5, right: -5, background: C.orange, color: "#0E0E10",
-                  fontSize: 11, fontWeight: 800, minWidth: 19, height: 19, borderRadius: 999,
-                  display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px",
-                  boxShadow: "0 2px 6px rgba(0,0,0,0.45)",
-                }}
-              >
-                {qtdItensCarrinho}
-              </span>
+              <ShoppingBag size={19} />
+              <span className="cart-btn-count num">{qtdItensCarrinho}</span>
             </button>
           )}
         </div>
-      </div>
+      </header>
 
+      {/* ---------------- CARDÁPIO ---------------- */}
       {tela === "cardapio" && (
-        <div className="df-hero-wrap" style={{ maxWidth: 640, margin: "0 auto", padding: "10px 16px 0", position: "relative", zIndex: 1 }}>
-          <div style={{ textAlign: "center", marginBottom: 16, padding: "6px 4px 0" }}>
-            <div
-              className="display df-hero-title"
-              style={{
-                fontSize: 30,
-                fontWeight: 800,
-                lineHeight: 1.15,
-                background: "linear-gradient(120deg, #FFD37A, #F5940A)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-                textShadow: "0 2px 16px rgba(0,0,0,0.6)",
-              }}
-            >
-              O sabor que conquista
-            </div>
-            <div className="df-hero-sub" style={{ fontSize: 12.5, color: "rgba(245,245,247,0.9)", marginTop: 5, textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>Escolha seus favoritos e monte seu pedido.</div>
-            {tempoEntregaVisivel && (
-              <div
-                style={{
-                  marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(28,18,4,0.85)",
-                  border: "1px solid rgba(245,148,10,0.35)", color: C.orangeText, borderRadius: 999,
-                  padding: "6px 12px", fontSize: 12.5, fontWeight: 700,
-                }}
-              >
-                <Bike size={14} /> {textoTempoEntrega}
-              </div>
-            )}
-          </div>
-
-          <div className="no-scrollbar df-cat-scroll" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 14, WebkitOverflowScrolling: "touch" }}>
-            {abasCategorias.map((cat) => {
-              const ativa = categoriaAtiva === cat;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setCategoriaAtiva(cat)}
-                  className="cat-pill"
-                  style={{
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                    padding: "9px 15px",
-                    borderRadius: 999,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    border: `1px solid ${ativa ? C.orange : C.border}`,
-                    background: ativa ? C.orange : C.cardAlt,
-                    color: ativa ? "#0E0E10" : C.textSoft,
-                  }}
-                >
-                  {cat === "Todos" ? "🛒 " : CATEGORIA_EMOJI[cat] ? `${CATEGORIA_EMOJI[cat]} ` : ""}{cat}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="df-content-wrap" style={{ maxWidth: 640, margin: "0 auto", padding: tela === "cardapio" ? "0 16px" : "16px 16px 0", position: "relative", zIndex: 1 }}>
-
-        {/* ---------------- CARDÁPIO ---------------- */}
-        {tela === "cardapio" && (
-          <div className="df-main-grid">
-          <div className="df-products-col">
-            {pedidoAtual && (
-              <button
-                onClick={() => setTela("acompanhar")}
-                style={{ ...btnOutline, width: "100%", marginBottom: 14, borderColor: C.orange, color: C.orangeText, background: "rgba(28,18,4,0.85)" }}
-              >
-                <ClipboardCheck size={16} /> Acompanhar meu pedido em andamento
-              </button>
-            )}
-            {lojaFechada && (
-              <div style={{ background: "rgba(40,14,14,0.90)", border: `1px solid ${C.red}`, borderRadius: 14, padding: "14px 16px", marginBottom: 14, display: "flex", gap: 12 }}>
-                <Store size={20} color={C.red} style={{ flexShrink: 0, marginTop: 1 }} />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: C.red, marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.5 }}>Loja fechada</div>
-                  <div style={{ fontSize: 14, color: C.text, lineHeight: 1.45 }}>{mensagemLojaFechada || "Estamos fechados no momento."}</div>
-                </div>
-              </div>
-            )}
-            {!lojaFechada && !statusLoja.aberta && horarios && (
-              <div style={{ background: "rgba(28,18,4,0.90)", border: `1px solid ${C.orange}`, borderRadius: 12, padding: "12px 14px", marginBottom: 14, display: "flex", gap: 10 }}>
-                <Clock size={18} color={C.orangeText} style={{ flexShrink: 0, marginTop: 1 }} />
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: C.orangeText, marginBottom: 3 }}>Fora do horário de atendimento</div>
-                  <div style={{ fontSize: 12.5, color: C.textSoft, marginBottom: 4 }}>
-                    Você pode fazer seu pedido normalmente — ele fica reservado para o próximo dia de funcionamento. {resumoHorarios(horarios)}
-                    {configDiaEscolhido?.entregaAbre ? ` Nossa entrega começa às ${configDiaEscolhido.entregaAbre}.` : ""}
-                  </div>
-                </div>
-              </div>
-            )}
-            {erro && <div style={{ background: "rgba(40,14,14,0.90)", border: `1px solid ${C.red}`, color: C.red, fontSize: 13, padding: "10px 12px", borderRadius: 10, marginBottom: 14 }}>{erro}</div>}
-            {cardapio.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint, fontSize: 14 }}>
-                Cardápio ainda não disponível. Volte em instantes.
-              </div>
-            )}
-            {cardapio.length > 0 && secoesExibidas.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint, fontSize: 14 }}>
-                Nenhum produto nesta categoria no momento.
-              </div>
-            )}
-            {secoesExibidas.map(([categoria, itens]) => (
-              <div key={categoria} style={{ marginBottom: 22 }}>
-                {categoriaAtiva === "Todos" && categoria !== SEM_CATEGORIA && (
-                  <div className="display" style={{ fontSize: 13.5, fontWeight: 700, color: C.orangeText, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    {CATEGORIA_EMOJI[categoria] ? `${CATEGORIA_EMOJI[categoria]} ` : ""}{categoria}
-                  </div>
+        <>
+          <section className="hero">
+            <div className="df-wrap hero-grid">
+              <div className="hero-stage">
+                {slidesHero.length > 0 ? (
+                  slidesHero.map((s, i) => (
+                    <img
+                      key={s.id}
+                      src={fotoDe(s, 1200)}
+                      alt={i === indiceSlide ? s.nome : ""}
+                      aria-hidden={i !== indiceSlide}
+                      onError={() => marcarQuebrada(s)}
+                      fetchpriority={i === 0 ? "high" : "low"}
+                      loading={i === 0 ? "eager" : "lazy"}
+                      className={`hero-slide${i === indiceSlide ? " is-on" : ""}`}
+                    />
+                  ))
+                ) : (
+                  <img src={BG_FRANGO_URL} alt="Frango assado dourado sobre tábua de madeira" fetchpriority="high" className="hero-slide is-on" />
                 )}
-                <div className="df-products-grid" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {itens.map((item) => {
-                    const qtd = carrinho[item.id] || 0;
-                    const esgotado = item.estoque != null && item.estoque <= 0;
-                    const limiteAtingido = item.estoque != null && qtd >= item.estoque;
-                    const fotoQuebrada = !!imagensQuebradas[item.id];
-                    const foto = !fotoQuebrada ? (item.fotoUrl || imagemPadraoProduto(item.nome)) : null;
-                    return (
-                      <div
-                        key={item.id}
-                        className="menu-card"
-                        style={{
-                          background: C.card,
-                          border: `1px solid ${qtd > 0 ? C.orange : C.border}`,
-                          borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column",
-                          boxShadow: qtd > 0 ? "0 4px 18px rgba(245,148,10,0.16)" : "0 2px 10px rgba(0,0,0,0.18)",
-                        }}
-                      >
-                        <div className="menu-card-img-wrap" style={{ position: "relative", width: "100%", height: 176, flexShrink: 0 }}>
-                          {foto ? (
-                            <img
-                              src={foto}
-                              alt={item.nome}
-                              onError={() => setImagensQuebradas((m) => ({ ...m, [item.id]: true }))}
-                              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: esgotado ? "grayscale(1)" : "none", opacity: esgotado ? 0.6 : 1 }}
-                            />
-                          ) : (
-                            <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #2A2830, #201F23)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <UtensilsCrossed size={30} color={C.textFaint} />
-                            </div>
-                          )}
-                          {esgotado && (
-                            <span style={{ position: "absolute", left: 8, right: 8, bottom: 8, textAlign: "center", background: "rgba(14,14,16,0.88)", color: C.red, fontSize: 10.5, fontWeight: 800, borderRadius: 6, padding: "2px 0", textTransform: "uppercase", letterSpacing: 0.4 }}>
-                              Esgotado
-                            </span>
-                          )}
-                          {qtd > 0 && (
-                            <span className="mono" style={{ position: "absolute", top: 8, right: 8, background: C.orange, color: "#0E0E10", fontSize: 11.5, fontWeight: 800, minWidth: 22, height: 22, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px", boxShadow: "0 2px 8px rgba(0,0,0,0.45)" }}>
-                              {qtd}
-                            </span>
-                          )}
-                        </div>
-                        <div className="menu-card-body" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: "12px 14px 14px" }}>
-                          <div style={{ fontSize: 15.5, fontWeight: 700, color: C.text, lineHeight: 1.3 }}>{item.nome}</div>
-                          {item.descricao && (
-                            <div style={{ fontSize: 12.5, color: C.textSoft, marginTop: 3, lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                              {item.descricao}
-                            </div>
-                          )}
-                          <div className="menu-card-foot" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 8, gap: 8 }}>
-                            <span className="mono menu-card-price" style={{ fontSize: 16, fontWeight: 700, color: C.orangeText }}>{fmt(item.preco)}</span>
-                            {lojaFechada ? (
-                              <span style={{ fontSize: 11.5, color: C.textFaint, fontWeight: 600 }}>Loja fechada</span>
-                            ) : esgotado ? (
-                              <span style={{ fontSize: 11.5, color: C.textFaint, fontWeight: 600 }}>Indisponível</span>
-                            ) : qtd === 0 ? (
-                              <button
-                                onClick={() => alterarQtd(item.id, 1)}
-                                className="add-btn"
-                                style={{ background: C.orange, border: "none", borderRadius: 999, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-                                aria-label={`Adicionar ${item.nome}`}
-                              >
-                                <Plus size={19} color="#0E0E10" />
-                              </button>
-                            ) : (
-                              <div className="menu-card-qty" style={{ display: "flex", alignItems: "center", gap: 8, background: C.cardAlt, borderRadius: 999, padding: 3 }}>
-                                <button onClick={() => alterarQtd(item.id, -1)} className="qty-btn" style={{ background: C.card, border: "none", borderRadius: 999, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label={`Diminuir ${item.nome}`}>
-                                  <Minus size={14} color={C.text} />
-                                </button>
-                                <span key={qtd} className="mono qty-pop" style={{ fontSize: 14, fontWeight: 700, minWidth: 16, textAlign: "center", display: "inline-block" }}>{qtd}</span>
-                                <button
-                                  onClick={() => !limiteAtingido && alterarQtd(item.id, 1)}
-                                  disabled={limiteAtingido}
-                                  className="qty-btn"
-                                  style={{ background: limiteAtingido ? C.card : C.orange, border: "none", borderRadius: 999, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", opacity: limiteAtingido ? 0.5 : 1 }}
-                                  aria-label={`Aumentar ${item.nome}`}
-                                >
-                                  <Plus size={14} color={limiteAtingido ? C.textFaint : "#0E0E10"} />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            {/* Benefícios — só faz sentido depois do cardápio carregado */}
-            {cardapio.length > 0 && (
-              <div
-                className="df-benefits"
-                style={{
-                  display: "flex", flexDirection: "column", marginTop: 30, marginBottom: 10,
-                  background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden",
-                }}
-              >
-                {[
-                  { icon: <Bike size={20} color={C.orange} />, titulo: "Entrega rápida e segura", texto: "Seu pedido no conforto de casa." },
-                  { icon: <ClipboardCheck size={20} color={C.orange} />, titulo: "Qualidade garantida", texto: "Ingredientes selecionados todos os dias." },
-                  { icon: <UtensilsCrossed size={20} color={C.orange} />, titulo: "Sabor que faz a diferença", texto: "Do jeito que você gosta, sempre." },
-                ].map((b, i) => (
-                  <div
-                    key={b.titulo}
-                    className="df-benefit-item"
-                    style={{
-                      display: "flex", gap: 12, alignItems: "flex-start", padding: "16px 18px",
-                      borderTop: i > 0 ? `1px solid ${C.borderSoft}` : "none",
-                    }}
-                  >
-                    <div style={{ width: 38, height: 38, borderRadius: 10, background: C.orangeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{b.icon}</div>
-                    <div>
-                      <div className="display" style={{ fontSize: 14, fontWeight: 700, marginBottom: 3 }}>{b.titulo}</div>
-                      <div style={{ fontSize: 12.5, color: C.textSoft, lineHeight: 1.4 }}>{b.texto}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Carrinho lateral — visível só no computador; no celular o pedido segue pela barra flutuante */}
-          <div className="df-cart-aside" style={{ display: "none" }}>
-            <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 18, padding: 18 }}>
-              <div className="display" style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>Seu pedido</div>
-              {itensCarrinho.length === 0 ? (
-                <div style={{ fontSize: 13, color: C.textFaint, padding: "18px 0", textAlign: "center" }}>Seu carrinho está vazio.</div>
-              ) : (
-                <>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, maxHeight: 360, overflowY: "auto" }}>
-                    {itensCarrinho.map(({ item, qtd }) => {
-                      const fotoQuebrada = !!imagensQuebradas[item.id];
-                      const foto = !fotoQuebrada ? (item.fotoUrl || imagemPadraoProduto(item.nome)) : null;
-                      return (
-                        <div key={item.id} style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                          {foto ? (
-                            <img src={foto} alt={item.nome} style={{ width: 46, height: 46, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
-                          ) : (
-                            <div style={{ width: 46, height: 46, borderRadius: 10, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                              <UtensilsCrossed size={18} color={C.textFaint} />
-                            </div>
-                          )}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.nome}</div>
-                            <span className="mono" style={{ fontSize: 11.5, color: C.textSoft }}>{fmt(item.preco * qtd)}</span>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                            <button onClick={() => alterarQtd(item.id, -1)} className="qty-btn" style={{ background: C.cardAlt, border: "none", borderRadius: 7, width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label="Diminuir"><Minus size={12} color={C.text} /></button>
-                            <span className="mono" style={{ fontSize: 12, fontWeight: 700, minWidth: 14, textAlign: "center" }}>{qtd}</span>
-                            <button
-                              onClick={() => (item.estoque == null || qtd < item.estoque) && alterarQtd(item.id, 1)}
-                              disabled={item.estoque != null && qtd >= item.estoque}
-                              className="qty-btn"
-                              style={{ background: item.estoque != null && qtd >= item.estoque ? C.cardAlt : C.orange, border: "none", borderRadius: 7, width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}
-                              aria-label="Aumentar"
-                            ><Plus size={12} color={item.estoque != null && qtd >= item.estoque ? C.textFaint : "#0E0E10"} /></button>
-                            <button onClick={() => removerDoCarrinho(item.id)} className="qty-btn" style={{ background: "none", border: "none", padding: 4 }} aria-label={`Remover ${item.nome}`}><Trash2 size={14} color={C.textFaint} /></button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${C.borderSoft}`, paddingTop: 12, marginBottom: 14 }}>
-                    <span style={{ fontSize: 13.5, color: C.textSoft, fontWeight: 600 }}>Total</span>
-                    <span className="mono" style={{ fontSize: 19, fontWeight: 800, color: C.orangeText }}>{fmt(totalCarrinho)}</span>
-                  </div>
-                  <button onClick={() => setTela("checkout")} disabled={lojaFechada} style={{ ...btnPrimary, opacity: lojaFechada ? 0.6 : 1 }}>
-                    Ver meu pedido <ChevronRight size={16} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-          </div>
-        )}
-
-        {/* ---------------- CARRINHO ---------------- */}
-        {tela === "carrinho" && (
-          <>
-            {itensCarrinho.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "40px 16px", color: C.textFaint, fontSize: 14 }}>Seu carrinho está vazio.</div>
-            ) : (
-              <>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-                  {itensCarrinho.map(({ item, qtd }) => (
-                    <div key={item.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{item.nome}</div>
-                        <span className="mono" style={{ fontSize: 12.5, color: C.textSoft }}>{fmt(item.preco)} cada · <span style={{ color: C.orangeText, fontWeight: 700 }}>{fmt(item.preco * qtd)}</span></span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        <button onClick={() => alterarQtd(item.id, -1)} className="qty-btn" style={{ background: C.cardAlt, border: "none", borderRadius: 8, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center" }} aria-label="Diminuir">
-                          <Minus size={14} color={C.text} />
-                        </button>
-                        <span key={qtd} className="mono qty-pop" style={{ fontSize: 14, fontWeight: 700, minWidth: 16, textAlign: "center", display: "inline-block" }}>{qtd}</span>
-                        <button
-                          onClick={() => (item.estoque == null || qtd < item.estoque) && alterarQtd(item.id, 1)}
-                          disabled={item.estoque != null && qtd >= item.estoque}
-                          className="qty-btn"
-                          style={{ background: item.estoque != null && qtd >= item.estoque ? C.cardAlt : C.orange, border: "none", borderRadius: 8, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", opacity: item.estoque != null && qtd >= item.estoque ? 0.5 : 1 }}
-                          aria-label="Aumentar"
-                        >
-                          <Plus size={14} color="#0E0E10" />
-                        </button>
-                        <button onClick={() => removerDoCarrinho(item.id)} className="qty-btn" style={{ background: "none", border: "none", padding: 6, marginLeft: 2 }} aria-label={`Remover ${item.nome}`}>
-                          <Trash2 size={16} color={C.textFaint} />
-                        </button>
-                      </div>
-                    </div>
+                <div className="hero-stage-sombra" aria-hidden="true" />
+                <div className="brasas" aria-hidden="true">
+                  {BRASAS.map((b, i) => (
+                    <span key={i} style={{ left: `${b.x}%`, width: b.s, height: b.s, animationDelay: `${b.d}s`, animationDuration: `${b.t}s`, "--drift": `${b.dx}px` }} />
                   ))}
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "0 4px" }}>
-                  <span style={{ fontSize: 14, color: C.textSoft }}>Total</span>
-                  <span className="mono" style={{ fontSize: 19, fontWeight: 700, color: C.orangeText }}>{fmt(totalCarrinho)}</span>
+
+                {slidesHero.length > 1 && (
+                  <div className="story-bars">
+                    {slidesHero.map((s, i) => (
+                      <button
+                        key={s.id}
+                        onClick={() => setSlide(i)}
+                        aria-label={`Ver ${s.nome}`}
+                        className={i < indiceSlide ? "is-done" : i === indiceSlide ? "is-on" : ""}
+                      >
+                        <span key={i === indiceSlide ? `on-${slide}` : "off"} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {slideAtual && (
+                  <div key={slideAtual.id} className="hero-produto">
+                    <div className="hero-produto-info">
+                      <span className="hero-produto-nome">{slideAtual.nome}</span>
+                      <span className="hero-produto-preco num">{fmt(slideAtual.preco)}</span>
+                    </div>
+                    {renderAcao(slideAtual)}
+                  </div>
+                )}
+              </div>
+
+              <div className="hero-copy">
+                <h1 className="hero-title" aria-label="Frango assado na hora, do jeito que só o Divino faz.">
+                  {TITULO_HERO.map((p, i) => (
+                    <span key={i} aria-hidden="true" className={`palavra${p.destaque ? " is-destaque" : ""}`} style={{ animationDelay: `${0.08 + i * 0.06}s` }}>
+                      {p.texto}{" "}
+                    </span>
+                  ))}
+                </h1>
+                <p className="hero-sub">Monte seu pedido em poucos toques e receba em casa ou retire no balcão.</p>
+                <div className="hero-ctas">
+                  <button className="btn btn-primary btn-lg btn-brilho" onClick={irParaCardapio}>
+                    Fazer meu pedido <ArrowRight size={18} />
+                  </button>
+                  {pedidoAtual && (
+                    <button className="btn btn-ghost btn-lg" onClick={() => setTela("acompanhar")}>
+                      <ClipboardCheck size={17} /> Acompanhar pedido
+                    </button>
+                  )}
                 </div>
-                <button onClick={() => setTela("checkout")} style={btnPrimary}>Continuar pedido</button>
+              </div>
+            </div>
+          </section>
+
+          <div className="df-wrap">
+            <ul className="vantagens">
+              {tempoEntregaVisivel && (
+                <li>
+                  <Timer size={18} />
+                  <span><strong>{faixaTempo}</strong> para entregar</span>
+                </li>
+              )}
+              <li>
+                <Store size={18} />
+                <span><strong>Retire</strong> no balcão sem taxa</span>
+              </li>
+              <li>
+                <Wallet size={18} />
+                <span><strong>Pague na hora</strong>: Pix, cartão ou dinheiro</span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="df-wrap df-main-grid">
+            <div className="df-products-col" ref={menuRef} id="cardapio">
+              {lojaFechada && (
+                <div className="aviso aviso-off">
+                  <Store size={20} />
+                  <div>
+                    <strong>Loja fechada</strong>
+                    <p>{mensagemLojaFechada || "Estamos fechados no momento."}</p>
+                  </div>
+                </div>
+              )}
+              {!lojaFechada && !statusLoja.aberta && horarios && (
+                <div className="aviso aviso-agenda">
+                  <CalendarClock size={20} />
+                  <div>
+                    <strong>Peça agora e garanta o seu</strong>
+                    <p>
+                      Estamos fora do horário, mas seu pedido já fica reservado para o próximo dia de funcionamento.
+                      {configDiaEscolhido?.entregaAbre ? ` A entrega começa às ${configDiaEscolhido.entregaAbre}.` : ""}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {erro && <div className="aviso aviso-erro"><p>{erro}</p></div>}
+
+              <nav className="cats no-scrollbar" aria-label="Categorias do cardápio">
+                {abasCategorias.map((cat) => {
+                  const Icone = cat === "Todos" ? Utensils : CATEGORIA_ICONE[cat];
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setCategoriaAtiva(cat)}
+                      className={`cat-pill${categoriaAtiva === cat ? " is-active" : ""}`}
+                      aria-pressed={categoriaAtiva === cat}
+                    >
+                      {Icone && <Icone size={15} />} {cat}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {cardapio.length === 0 && (
+                <div className="vazio">
+                  <UtensilsCrossed size={28} />
+                  <p>O cardápio ainda não está disponível. Volte em instantes.</p>
+                </div>
+              )}
+              {cardapio.length > 0 && secoesExibidas.length === 0 && (
+                <div className="vazio">
+                  <UtensilsCrossed size={28} />
+                  <p>Nenhum produto nesta categoria no momento.</p>
+                </div>
+              )}
+
+              {secoesExibidas.map(([categoria, itens]) => {
+                const Icone = CATEGORIA_ICONE[categoria];
+                return (
+                  <section key={categoria} className="secao">
+                    {categoriaAtiva === "Todos" && categoria !== SEM_CATEGORIA && (
+                      <h2 className="secao-titulo">
+                        {Icone && <Icone size={20} />} {categoria}
+                      </h2>
+                    )}
+                    <div className="prod-grid">
+                      {itens.map((item) => {
+                        const qtd = carrinho[item.id] || 0;
+                        return (
+                          <article key={item.id} className={`prod${qtd > 0 ? " is-in-cart" : ""}`}>
+                            <div className="prod-media">
+                              {/* fundo desfocado da própria foto: a foto aparece inteira (sem corte/zoom) e as sobras ficam preenchidas */}
+                              {fotoDe(item, 480) && <img src={fotoDe(item, 480)} alt="" aria-hidden="true" loading="lazy" decoding="async" className="prod-img-fundo" />}
+                              {renderFoto(item, "prod-img", 480)}
+                              {qtd > 0 && <span key={qtd} className="prod-qtd num qty-pop">{qtd}</span>}
+                            </div>
+                            <div className="prod-body">
+                              <h3 className="prod-nome">{item.nome}</h3>
+                              {item.descricao && <p className="prod-desc">{item.descricao}</p>}
+                              {seloEstoque(item)}
+                              <div className="prod-foot">
+                                <span className="prod-preco num">{fmt(item.preco)}</span>
+                                {renderAcao(item)}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+
+            {/* Carrinho lateral: só no computador */}
+            <aside className="df-cart-aside">
+              <div className="painel">
+                <div className="painel-titulo">Seu pedido</div>
+                {itensCarrinho.length === 0 ? (
+                  <div className="painel-vazio">
+                    <ShoppingBag size={26} />
+                    <p>Seu carrinho está vazio. Toque no + de um produto para começar.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="cart-list">{itensCarrinho.map(({ item, qtd }) => linhaCarrinho(item, qtd, true))}</div>
+                    <div className="total-linha">
+                      <span>Subtotal</span>
+                      <span className="num">{fmt(subtotalCarrinho)}</span>
+                    </div>
+                    <button onClick={() => setTela("checkout")} disabled={lojaFechada} className="btn btn-primary btn-lg btn-block">
+                      Finalizar pedido <ArrowRight size={18} />
+                    </button>
+                  </>
+                )}
+              </div>
+            </aside>
+          </div>
+
+          {!lojaFechada && cardapio.length > 0 && (
+            <section className="df-wrap fome">
+              <div className="fome-inner">
+                <img src={LOGO_URL} alt="" loading="lazy" decoding="async" aria-hidden="true" className="fome-mascote" />
+                <div className="fome-copy">
+                  <h2>Bateu a fome? Seu frango está a poucos toques.</h2>
+                  <button className="btn btn-primary btn-lg" onClick={qtdItensCarrinho > 0 ? () => setTela("carrinho") : irParaCardapio}>
+                    {qtdItensCarrinho > 0 ? "Ver meu pedido" : "Fazer meu pedido"} <ArrowRight size={18} />
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <footer className="df-wrap rodape">
+            <div className="rodape-marca">
+              <img src={LOGO_URL} alt="Divino Frango" width={56} height={56} />
+              <div>
+                <div className="rodape-nome">Divino Frango</div>
+                <p>Frango assado na hora, pedido pelo site. Retire no balcão ou receba em casa.</p>
+              </div>
+            </div>
+            <a className="rodape-whats" href={LINK_WHATSAPP} target="_blank" rel="noopener noreferrer">
+              <span className="rodape-whats-icone"><IconeWhatsApp size={22} /></span>
+              <span>
+                <strong>Ficou com dúvida?</strong>
+                Chame no WhatsApp <span className="num">{WHATSAPP_EXIBICAO}</span>
+              </span>
+            </a>
+            <div className="rodape-pag">
+              <span className="rodape-pag-titulo">Pagamento na entrega ou retirada</span>
+              <div className="rodape-pag-lista">
+                {["Pix", "Crédito", "Débito", "Dinheiro"].map((p) => <span key={p}>{p}</span>)}
+              </div>
+            </div>
+            <div className="rodape-copy">© {new Date().getFullYear()} Divino Frango</div>
+          </footer>
+        </>
+      )}
+
+      <main className="df-wrap df-tela">
+        {/* ---------------- CARRINHO ---------------- */}
+        {tela === "carrinho" && (
+          <div className="tela-estreita">
+            {itensCarrinho.length === 0 ? (
+              <div className="vazio">
+                <ShoppingBag size={28} />
+                <p>Seu carrinho está vazio.</p>
+                <button className="btn btn-primary" onClick={() => setTela("cardapio")}>Ver cardápio</button>
+              </div>
+            ) : (
+              <>
+                <div className="painel">
+                  <div className="cart-list">{itensCarrinho.map(({ item, qtd }) => linhaCarrinho(item, qtd, false))}</div>
+                </div>
+                {blocoSugestoes}
+                <div className="total-linha total-grande">
+                  <span>Subtotal</span>
+                  <span className="num">{fmt(subtotalCarrinho)}</span>
+                </div>
+                <button onClick={() => setTela("checkout")} className="btn btn-primary btn-lg btn-block">
+                  Continuar pedido <ArrowRight size={18} />
+                </button>
+                <button onClick={() => setTela("cardapio")} className="btn btn-link btn-block">Adicionar mais itens</button>
               </>
             )}
-          </>
+          </div>
         )}
 
         {/* ---------------- CHECKOUT ---------------- */}
         {tela === "checkout" && (
           <div className="df-main-grid">
-          <div className="df-products-col">
-            <div className="display" style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>Faça seu pedido</div>
+            <div className="df-products-col checkout">
+              {erro && <div className="aviso aviso-erro"><p>{erro}</p></div>}
 
-            {erro && <div style={{ background: "rgba(248,113,113,0.14)", color: C.red, fontSize: 13, padding: "10px 12px", borderRadius: 10, marginBottom: 14 }}>{erro}</div>}
-
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: C.orangeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 20 }}>
-                <User size={16} color={C.orangeText} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Nome completo <span style={{ color: C.orangeText }}>*</span></div>
-                <input placeholder="Digite seu nome" value={form.nome} onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))} style={inputStyle} />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: C.orangeSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 20 }}>
-                <Phone size={16} color={C.orangeText} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Telefone / WhatsApp <span style={{ color: C.orangeText }}>*</span></div>
+              <div className="campo-grupo">
+                <div className="campo-grupo-titulo"><User size={17} /> Seus dados</div>
+                <label style={labelStyle} htmlFor="df-nome">Nome completo <span className="obrig">*</span></label>
+                <input id="df-nome" autoComplete="name" placeholder="Digite seu nome" value={form.nome} onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))} style={{ ...inputStyle, marginBottom: 12 }} />
+                <label style={labelStyle} htmlFor="df-tel">Telefone / WhatsApp <span className="obrig">*</span></label>
                 <input
+                  id="df-tel"
+                  autoComplete="tel"
                   placeholder="(11) 98765-4321"
                   value={form.telefone}
                   onChange={(e) => setForm((f) => ({ ...f, telefone: mascaraTelefone(e.target.value) }))}
@@ -1134,253 +1126,216 @@ export default function PedidoApp() {
                   style={inputStyle}
                 />
               </div>
-            </div>
 
-            {!statusLoja.aberta && proximosDiasAbertos.length > 0 && (
-              <>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Para qual dia é o pedido?</div>
-                <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-                  {proximosDiasAbertos.map((d) => (
+              <div className="campo-grupo">
+                <div className="campo-grupo-titulo"><Bike size={17} /> Como você quer receber?</div>
+
+                {!statusLoja.aberta && proximosDiasAbertos.length > 0 && (
+                  <>
+                    <span style={labelStyle}>Para qual dia é o pedido?</span>
+                    <div className="chips" style={{ marginBottom: 14 }}>
+                      {proximosDiasAbertos.map((d) => (
+                        <button key={d.iso} onClick={() => setDiaEscolhido(d.iso)} className={`chip${diaEscolhido === d.iso ? " is-active" : ""}`} style={{ textTransform: "capitalize" }}>
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                <div className="segmento">
+                  <button onClick={() => setForm((f) => ({ ...f, tipoEntrega: "retirada" }))} className={form.tipoEntrega === "retirada" ? "is-active" : ""}>
+                    <Store size={17} /> Retirada
+                  </button>
+                  <button onClick={() => setForm((f) => ({ ...f, tipoEntrega: "entrega" }))} className={form.tipoEntrega === "entrega" ? "is-active" : ""}>
+                    <Bike size={17} /> Entrega
+                  </button>
+                </div>
+                {(configDiaEscolhido || horarios) && (
+                  <div className="dica">
+                    Nossa entrega começa às {(statusLoja.aberta ? horarios?.[new Date().getDay()]?.entregaAbre : configDiaEscolhido?.entregaAbre) || "11:00"}
+                    {!statusLoja.aberta ? " no dia escolhido acima." : " hoje."}
+                    {form.tipoEntrega === "entrega" && tempoEntregaVisivel ? ` ${textoTempoEntrega}.` : ""}
+                  </div>
+                )}
+
+                {form.tipoEntrega === "entrega" && (
+                  <div style={{ marginTop: 14 }}>
+                    <label style={labelStyle} htmlFor="df-cep">CEP</label>
+                    <div style={{ position: "relative", marginBottom: 12 }}>
+                      <input id="df-cep" autoComplete="postal-code" inputMode="numeric" placeholder="00000-000" value={form.cep} onChange={(e) => buscarCep(e.target.value)} maxLength={9} style={inputStyle} />
+                      {buscandoCep && <Loader2 size={16} className="spin-loader" style={{ position: "absolute", right: 12, top: 14 }} color={C.textSoft} />}
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <div style={{ flex: 2, minWidth: 0 }}>
+                        <label style={labelStyle} htmlFor="df-rua">Rua</label>
+                        <input id="df-rua" autoComplete="address-line1" placeholder="Rua" value={form.rua} onChange={(e) => setForm((f) => ({ ...f, rua: e.target.value }))} style={inputStyle} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <label style={labelStyle} htmlFor="df-num">Número</label>
+                        <input id="df-num" placeholder="Nº" value={form.numero} onChange={(e) => setForm((f) => ({ ...f, numero: e.target.value }))} style={inputStyle} />
+                      </div>
+                    </div>
+
+                    <label style={labelStyle} htmlFor="df-bairro">Bairro</label>
+                    {bairrosEntrega.length > 0 ? (
+                      <>
+                        <select
+                          id="df-bairro"
+                          value={form.bairro}
+                          onChange={(e) => { setForm((f) => ({ ...f, bairro: e.target.value })); setBairroForaDaArea(""); }}
+                          style={{ ...inputStyle, marginBottom: bairroForaDaArea ? 6 : 12 }}
+                        >
+                          <option value="">Selecione seu bairro</option>
+                          {bairrosEntrega.map((b) => (
+                            <option key={b.id} value={b.nome}>{b.nome}</option>
+                          ))}
+                        </select>
+                        {bairroForaDaArea && (
+                          <div className="dica dica-alerta">
+                            Seu CEP indica o bairro "{bairroForaDaArea}", que ainda não está na nossa área de entrega. Selecione um bairro atendido acima ou escolha retirada.
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <input id="df-bairro" placeholder="Bairro" value={form.bairro} onChange={(e) => setForm((f) => ({ ...f, bairro: e.target.value }))} style={{ ...inputStyle, marginBottom: 12 }} />
+                    )}
+                    <label style={labelStyle} htmlFor="df-ref">Ponto de referência (opcional)</label>
+                    <input id="df-ref" placeholder="Ex: perto do mercado" value={form.referencia} onChange={(e) => setForm((f) => ({ ...f, referencia: e.target.value }))} style={inputStyle} />
+                  </div>
+                )}
+              </div>
+
+              <div className="campo-grupo">
+                <div className="campo-grupo-titulo"><CreditCard size={17} /> Pagamento na entrega ou retirada</div>
+                <div className="chips" style={{ marginBottom: 12 }}>
+                  {FORMAS_PAGAMENTO.map((fp) => (
                     <button
-                      key={d.iso}
-                      onClick={() => setDiaEscolhido(d.iso)}
-                      style={{
-                        padding: "8px 12px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, textTransform: "capitalize",
-                        border: `1px solid ${diaEscolhido === d.iso ? C.orange : C.border}`,
-                        background: diaEscolhido === d.iso ? C.orangeSoft : "transparent",
-                        color: diaEscolhido === d.iso ? C.orangeText : C.textSoft,
-                      }}
+                      key={fp}
+                      onClick={() => setForm((f) => ({ ...f, formaPagamento: fp, precisaTroco: false, trocoPara: "" }))}
+                      className={`chip${form.formaPagamento === fp ? " is-active" : ""}`}
                     >
-                      {d.label}
+                      {fp}
                     </button>
                   ))}
                 </div>
-              </>
-            )}
 
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Retirada ou entrega?</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-              <button
-                onClick={() => setForm((f) => ({ ...f, tipoEntrega: "retirada" }))}
-                style={{ ...btnOutline, flex: 1, borderColor: form.tipoEntrega === "retirada" ? C.orange : C.border, background: form.tipoEntrega === "retirada" ? C.orangeSoft : "transparent", color: form.tipoEntrega === "retirada" ? C.orangeText : C.textSoft }}
-              >
-                <Store size={16} /> Retirada
-              </button>
-              <button
-                onClick={() => setForm((f) => ({ ...f, tipoEntrega: "entrega" }))}
-                style={{
-                  ...btnOutline, flex: 1,
-                  borderColor: form.tipoEntrega === "entrega" ? C.orange : C.border,
-                  background: form.tipoEntrega === "entrega" ? C.orangeSoft : "transparent",
-                  color: form.tipoEntrega === "entrega" ? C.orangeText : C.textSoft,
-                }}
-              >
-                <Bike size={16} /> Entrega
-              </button>
-            </div>
-            {(configDiaEscolhido || horarios) && (
-              <div style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 12 }}>
-                Nossa entrega começa às {(statusLoja.aberta ? horarios?.[new Date().getDay()]?.entregaAbre : configDiaEscolhido?.entregaAbre) || "11:00"}
-                {!statusLoja.aberta ? " no dia escolhido acima." : " hoje."}
-              </div>
-            )}
-
-            {form.tipoEntrega === "entrega" && tempoEntregaVisivel && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, color: C.orangeText, marginBottom: 12 }}>
-                <Bike size={14} /> {textoTempoEntrega}
-              </div>
-            )}
-
-            {form.tipoEntrega === "entrega" && (
-              <>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>CEP</div>
-                <div style={{ position: "relative", marginBottom: 12 }}>
-                  <input
-                    placeholder="00000-000"
-                    value={form.cep}
-                    onChange={(e) => buscarCep(e.target.value)}
-                    maxLength={9}
-                    style={inputStyle}
-                  />
-                  {buscandoCep && <Loader2 size={16} className="spin-loader" style={{ position: "absolute", right: 12, top: 13 }} color={C.textSoft} />}
-                </div>
-
-                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                  <div style={{ flex: 2 }}>
-                    <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Rua</div>
-                    <input placeholder="Rua" value={form.rua} onChange={(e) => setForm((f) => ({ ...f, rua: e.target.value }))} style={inputStyle} />
+                {form.formaPagamento === "Dinheiro" && (
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={labelStyle}>Precisa de troco?</span>
+                    <div className="segmento" style={{ marginBottom: form.precisaTroco ? 10 : 0 }}>
+                      <button onClick={() => setForm((f) => ({ ...f, precisaTroco: false, trocoPara: "" }))} className={!form.precisaTroco ? "is-active" : ""}>Não</button>
+                      <button onClick={() => setForm((f) => ({ ...f, precisaTroco: true }))} className={form.precisaTroco ? "is-active" : ""}>Sim</button>
+                    </div>
+                    {form.precisaTroco && (
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        placeholder="Troco para quanto? Ex: 100"
+                        value={form.trocoPara}
+                        onChange={(e) => setForm((f) => ({ ...f, trocoPara: e.target.value }))}
+                        style={inputStyle}
+                      />
+                    )}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Número</div>
-                    <input placeholder="Nº" value={form.numero} onChange={(e) => setForm((f) => ({ ...f, numero: e.target.value }))} style={inputStyle} />
-                  </div>
-                </div>
+                )}
+              </div>
 
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Bairro</div>
-                {bairrosEntrega.length > 0 ? (
+              <div className="campo-grupo">
+                {cupomAtivoSite && (
                   <>
-                    <select
-                      value={form.bairro}
-                      onChange={(e) => { setForm((f) => ({ ...f, bairro: e.target.value })); setBairroForaDaArea(""); }}
-                      style={{ ...inputStyle, marginBottom: bairroForaDaArea ? 6 : 12 }}
-                    >
-                      <option value="">Selecione seu bairro</option>
-                      {bairrosEntrega.map((b) => (
-                        <option key={b.id} value={b.nome}>{b.nome}</option>
-                      ))}
-                    </select>
-                    {bairroForaDaArea && (
-                      <div style={{ fontSize: 12, color: C.orangeText, marginBottom: 12 }}>
-                        Seu CEP indica o bairro "{bairroForaDaArea}", que ainda não está na nossa área de entrega. Selecione um bairro atendido acima ou escolha retirada.
+                    <label style={labelStyle} htmlFor="df-cupom">Cupom de desconto (opcional)</label>
+                    {cupomAplicado ? (
+                      <div className="cupom-ok">
+                        <span><BadgeCheck size={16} /> {cupomAplicado.codigo} aplicado</span>
+                        <button onClick={removerCupom} aria-label="Remover cupom">Remover</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8, marginBottom: cupomErro ? 6 : 14 }}>
+                        <input id="df-cupom" placeholder="Código do cupom" value={cupomInput} onChange={(e) => setCupomInput(e.target.value)} style={{ ...inputStyle, flex: 1, textTransform: "uppercase" }} />
+                        <button onClick={aplicarCupom} disabled={buscandoCupom} className="btn btn-ghost" style={{ flexShrink: 0 }}>
+                          {buscandoCupom ? <Loader2 size={15} className="spin-loader" /> : "Aplicar"}
+                        </button>
                       </div>
                     )}
+                    {cupomErro && <div className="dica dica-erro">{cupomErro}</div>}
                   </>
-                ) : (
-                  <input placeholder="Bairro" value={form.bairro} onChange={(e) => setForm((f) => ({ ...f, bairro: e.target.value }))} style={{ ...inputStyle, marginBottom: 12 }} />
                 )}
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Ponto de referência (opcional)</div>
-                <input placeholder="Ex: perto do mercado tal" value={form.referencia} onChange={(e) => setForm((f) => ({ ...f, referencia: e.target.value }))} style={{ ...inputStyle, marginBottom: 12 }} />
-              </>
-            )}
+                <label style={labelStyle} htmlFor="df-obs">Observação (opcional)</label>
+                <input id="df-obs" placeholder="" value={form.observacao} onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))} style={inputStyle} />
+              </div>
+            </div>
 
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Forma de pagamento</div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-              {FORMAS_PAGAMENTO.map((fp) => (
-                <button
-                  key={fp}
-                  onClick={() => setForm((f) => ({ ...f, formaPagamento: fp, precisaTroco: false, trocoPara: "" }))}
-                  style={{
-                    padding: "8px 12px", borderRadius: 999, fontSize: 12.5, fontWeight: 600,
-                    border: `1px solid ${form.formaPagamento === fp ? C.orange : C.border}`,
-                    background: form.formaPagamento === fp ? C.orangeSoft : "transparent",
-                    color: form.formaPagamento === fp ? C.orangeText : C.textSoft,
-                    display: "inline-flex", alignItems: "center", gap: 6,
-                  }}
-                >
-                  {fp === "Pix pela maquininha" && <CreditCard size={13} />} {fp}
+            <aside className="df-checkout-aside">
+              <div className="painel">
+                <div className="painel-titulo">Resumo do pedido</div>
+                {itensCarrinho.map(({ item, qtd }) => (
+                  <div key={item.id} className="resumo-linha">
+                    <span>{qtd}x {item.nome}</span>
+                    <span className="num">{fmt(item.preco * qtd)}</span>
+                  </div>
+                ))}
+                <div className="resumo-linha resumo-sep">
+                  <span>Subtotal</span>
+                  <span className="num">{fmt(subtotalCarrinho)}</span>
+                </div>
+                {descontoAplicado > 0 && (
+                  <div className="resumo-linha is-desconto">
+                    <span>Desconto ({cupomAplicado?.codigo})</span>
+                    <span className="num">-{fmt(descontoAplicado)}</span>
+                  </div>
+                )}
+                {form.tipoEntrega === "entrega" && (
+                  <div className="resumo-linha">
+                    <span>Taxa de entrega</span>
+                    <span className="num">{fmt(taxaAplicada)}</span>
+                  </div>
+                )}
+                <div className="total-linha total-grande">
+                  <span>Total</span>
+                  <span className="num">{fmt(totalCarrinho)}</span>
+                </div>
+
+                <button onClick={enviarPedido} disabled={enviando} className="btn btn-primary btn-lg btn-block">
+                  {enviando ? <Loader2 size={17} className="spin-loader" /> : <Check size={18} strokeWidth={2.6} />} {enviando ? "Enviando..." : "Enviar pedido"}
                 </button>
-              ))}
-            </div>
-
-            {form.formaPagamento === "Dinheiro" && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Precisa de troco?</div>
-                <div style={{ display: "flex", gap: 8, marginBottom: form.precisaTroco ? 10 : 0 }}>
-                  <button
-                    onClick={() => setForm((f) => ({ ...f, precisaTroco: false, trocoPara: "" }))}
-                    style={{ ...btnOutline, flex: 1, borderColor: !form.precisaTroco ? C.orange : C.border, background: !form.precisaTroco ? C.orangeSoft : "transparent", color: !form.precisaTroco ? C.orangeText : C.textSoft }}
-                  >
-                    Não
-                  </button>
-                  <button
-                    onClick={() => setForm((f) => ({ ...f, precisaTroco: true }))}
-                    style={{ ...btnOutline, flex: 1, borderColor: form.precisaTroco ? C.orange : C.border, background: form.precisaTroco ? C.orangeSoft : "transparent", color: form.precisaTroco ? C.orangeText : C.textSoft }}
-                  >
-                    Sim
-                  </button>
-                </div>
-                {form.precisaTroco && (
-                  <input
-                    type="number"
-                    placeholder="Troco para quanto? Ex: 100"
-                    value={form.trocoPara}
-                    onChange={(e) => setForm((f) => ({ ...f, trocoPara: e.target.value }))}
-                    style={inputStyle}
-                  />
-                )}
+                <p className="garantia">
+                  <BadgeCheck size={15} /> Você só paga na {form.tipoEntrega === "entrega" ? "entrega" : "retirada"} e acompanha o preparo por aqui.
+                </p>
+                <a className="link-whats" href={LINK_WHATSAPP} target="_blank" rel="noopener noreferrer">
+                  <IconeWhatsApp size={16} /> Dúvida antes de enviar? Fale com a gente
+                </a>
               </div>
-            )}
-
-            {cupomAtivoSite && (
-              <>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Cupom de desconto (opcional)</div>
-                {cupomAplicado ? (
-                  <div style={{ background: C.greenSoft, border: `1px solid ${C.green}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: C.green }} className="mono">{cupomAplicado.codigo} aplicado</span>
-                    <button onClick={removerCupom} style={{ background: "none", border: "none" }} aria-label="Remover cupom"><Minus size={15} color={C.green} /></button>
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", gap: 8, marginBottom: cupomErro ? 6 : 12 }}>
-                    <input placeholder="Código do cupom" value={cupomInput} onChange={(e) => setCupomInput(e.target.value)} style={{ ...inputStyle, flex: 1, textTransform: "uppercase" }} />
-                    <button onClick={aplicarCupom} disabled={buscandoCupom} style={{ ...btnOutline, flexShrink: 0 }}>
-                      {buscandoCupom ? <Loader2 size={15} className="spin-loader" /> : "Aplicar"}
-                    </button>
-                  </div>
-                )}
-                {cupomErro && <div style={{ fontSize: 12, color: C.red, marginBottom: 12 }}>{cupomErro}</div>}
-              </>
-            )}
-
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: C.textSoft, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.3 }}>Observação (opcional)</div>
-            <input placeholder="" value={form.observacao} onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))} style={{ ...inputStyle, marginBottom: 18 }} />
-          </div>
-
-          <div className="df-checkout-aside">
-            <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 18, padding: 18 }}>
-              <div className="display" style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>Resumo do pedido</div>
-              {itensCarrinho.map(({ item, qtd }) => (
-                <div key={item.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ color: C.textSoft }}>{qtd}x {item.nome}</span>
-                  <span className="mono">{fmt(item.preco * qtd)}</span>
-                </div>
-              ))}
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.borderSoft}` }}>
-                <span style={{ color: C.textSoft }}>Subtotal</span>
-                <span className="mono">{fmt(subtotalCarrinho)}</span>
-              </div>
-              {descontoAplicado > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
-                  <span style={{ color: C.green }}>Desconto ({cupomAplicado?.codigo})</span>
-                  <span className="mono" style={{ color: C.green }}>− {fmt(descontoAplicado)}</span>
-                </div>
-              )}
-              {form.tipoEntrega === "entrega" && (
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
-                  <span style={{ color: C.textSoft }}>Taxa de entrega</span>
-                  <span className="mono">{fmt(taxaAplicada)}</span>
-                </div>
-              )}
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, borderTop: `1px solid ${C.borderSoft}`, paddingTop: 8, marginTop: 6, marginBottom: 16 }}>
-                <span>Total</span>
-                <span className="mono" style={{ color: C.orangeText }}>{fmt(totalCarrinho)}</span>
-              </div>
-
-              <button onClick={enviarPedido} disabled={enviando} style={{ ...btnPrimary, opacity: enviando ? 0.7 : 1 }}>
-                {enviando ? <Loader2 size={17} className="spin-loader" /> : <Check size={17} />} {enviando ? "Enviando…" : "Enviar pedido"}
-              </button>
-            </div>
-          </div>
+            </aside>
           </div>
         )}
 
         {/* ---------------- ACOMPANHAR PEDIDO ---------------- */}
         {tela === "acompanhar" && pedidoAtual && (
-          <div style={{ padding: "20px 0" }}>
+          <div className="tela-estreita" style={{ paddingTop: 12 }}>
             {["recusado", "cancelado"].includes(pedidoAtual.status) ? (
-              <div style={{ textAlign: "center", padding: "40px 16px" }}>
-                <div style={{ width: 64, height: 64, borderRadius: "50%", background: C.redSoft || "rgba(248,113,113,0.14)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}>
-                  <Clock size={28} color={C.red} />
-                </div>
-                <div className="display" style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-                  {pedidoAtual.status === "cancelado" ? "Pedido cancelado" : "Pedido não aceito"}
-                </div>
-                <div style={{ fontSize: 13.5, color: C.textSoft, marginBottom: 24, lineHeight: 1.5 }}>
+              <div className="vazio">
+                <div className="icone-redondo is-erro"><Clock size={26} /></div>
+                <h2 className="acomp-titulo">{pedidoAtual.status === "cancelado" ? "Pedido cancelado" : "Pedido não aceito"}</h2>
+                <p>
                   {pedidoAtual.status === "cancelado"
                     ? "A loja cancelou este pedido. Entre em contato para saber mais ou faça um novo pedido."
                     : "A loja não conseguiu aceitar seu pedido dessa vez. Entre em contato ou tente novamente."}
-                </div>
-                <button onClick={novoPedido} style={btnPrimary}>Fazer novo pedido</button>
+                </p>
+                <button onClick={novoPedido} className="btn btn-primary btn-lg">Fazer novo pedido</button>
               </div>
             ) : (
-              <>
-                <div style={{ textAlign: "center", marginBottom: 28 }}>
-                  <div className="display" style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
-                    {pedidoAtual.status === "concluido" ? "Pedido concluído!" : "Acompanhando seu pedido"}
+              <div className="painel">
+                <div style={{ textAlign: "center", marginBottom: 24 }}>
+                  <div className={`icone-redondo${pedidoAtual.status === "concluido" ? " is-ok" : ""}`}>
+                    {pedidoAtual.status === "concluido" ? <Check size={26} strokeWidth={2.6} /> : <Flame size={26} />}
                   </div>
-                  <span className="mono" style={{ fontSize: 20, fontWeight: 700, color: C.orangeText }}>{fmt(pedidoAtual.total)}</span>
+                  <h2 className="acomp-titulo">{pedidoAtual.status === "concluido" ? "Pedido concluído. Bom apetite!" : "Recebemos seu pedido!"}</h2>
+                  <span className="acomp-total num">{fmt(pedidoAtual.total)}</span>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column" }}>
+                <ol className="etapas">
                   {[
                     { key: "pendente", label: "Pedido recebido" },
                     { key: "aceito", label: "Aceito pela loja" },
@@ -1389,66 +1344,405 @@ export default function PedidoApp() {
                     { key: "concluido", label: pedidoAtual.tipoEntrega === "entrega" ? "Entregue" : "Retirado" },
                   ].map((etapa, i) => {
                     const indiceAtual = ETAPAS.indexOf(pedidoAtual.status);
-                    const feito = i < indiceAtual;
-                    const atual = i === indiceAtual;
-                    const futuro = i > indiceAtual;
+                    const estado = i < indiceAtual ? "feito" : i === indiceAtual ? "atual" : "futuro";
                     return (
-                      <div key={etapa.key} style={{ display: "flex", gap: 14 }}>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                          <div style={{
-                            width: 30, height: 30, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                            background: feito ? C.greenSoft : atual ? C.orangeSoft : C.cardAlt,
-                            border: atual ? `2px solid ${C.orange}` : "none",
-                          }}>
-                            {feito ? <Check size={15} color={C.green} /> : atual ? <CircleDashed size={15} color={C.orange} className="spin-loader" /> : <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.textFaint }} />}
-                          </div>
-                          {i < 4 && <div style={{ width: 2, flex: 1, minHeight: 28, background: feito ? C.green : C.border, margin: "2px 0" }} />}
+                      <li key={etapa.key} className={`etapa is-${estado}`}>
+                        <div className="etapa-marca">
+                          {estado === "feito" ? <Check size={15} strokeWidth={2.6} /> : estado === "atual" ? <CircleDashed size={15} className="spin-loader" /> : null}
                         </div>
-                        <div style={{ paddingBottom: 24 }}>
-                          <div style={{ fontSize: 14, fontWeight: atual ? 700 : 600, color: futuro ? C.textFaint : C.text }}>{etapa.label}</div>
-                          {atual && <div style={{ fontSize: 12, color: C.orangeText, marginTop: 2 }}>Em andamento…</div>}
+                        <div>
+                          <div className="etapa-label">{etapa.label}</div>
+                          {estado === "atual" && <div className="etapa-sub">Em andamento...</div>}
                         </div>
-                      </div>
+                      </li>
                     );
                   })}
-                </div>
+                </ol>
 
                 {pedidoAtual.status === "concluido" && (
-                  <button onClick={novoPedido} style={{ ...btnPrimary, width: "100%", marginTop: 8 }}>Fazer novo pedido</button>
+                  <button onClick={novoPedido} className="btn btn-primary btn-lg btn-block" style={{ marginTop: 8 }}>Fazer novo pedido</button>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
-      </div>
+      </main>
 
-      {/* Barra flutuante do carrinho */}
-      {mostrarBarraCarrinho && (
-        <button
-          key={cartBump}
-          onClick={() => setTela("carrinho")}
-          className="cart-bar-in df-floating-cart-mobile"
-          style={{
-            position: "fixed",
-            bottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
-            left: 16, right: 16, maxWidth: 640, margin: "0 auto",
-            background: C.orange, color: "#0E0E10", border: "none", borderRadius: 16,
-            padding: "12px 16px", display: "flex", flexDirection: "column", gap: 4,
-            boxShadow: "0 10px 26px rgba(245,148,10,0.45)", zIndex: 25,
-          }}
+      {/* Aviso rápido de item adicionado (celular) */}
+      {toast && tela === "cardapio" && (
+        <div key={toast.k} className="toast" role="status">
+          <Check size={15} strokeWidth={2.6} /> {toast.nome} adicionado
+        </div>
+      )}
+
+      {/* Botão flutuante do WhatsApp (dúvidas) */}
+      {(tela === "cardapio" || tela === "carrinho") && (
+        <a
+          className={`whats-fab${mostrarBarraCarrinho ? " acima-cartbar" : ""}`}
+          href={LINK_WHATSAPP}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Tirar dúvidas pelo WhatsApp"
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700 }}>
-              <ShoppingCart size={17} /> {qtdItensCarrinho} {qtdItensCarrinho === 1 ? "item" : "itens"}
-            </span>
-            <span className="mono" style={{ fontSize: 15, fontWeight: 800 }}>{fmt(totalCarrinho)}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.4 }}>
-            Ver meu pedido <ChevronRight size={14} />
-          </div>
+          <IconeWhatsApp size={28} />
+          <span className="whats-fab-dica">Dúvidas? Chama no Whats</span>
+        </a>
+      )}
+
+      {/* Barra flutuante do carrinho (celular) */}
+      {mostrarBarraCarrinho && (
+        <button key={cartBump} onClick={() => setTela("carrinho")} className="cartbar">
+          <span className="cartbar-qtd num">{qtdItensCarrinho}</span>
+          <span className="cartbar-label">Ver meu pedido</span>
+          <span className="cartbar-total num">{fmt(subtotalCarrinho)}</span>
         </button>
       )}
     </div>
-    </>
   );
 }
+
+const CSS = `
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 132px; }
+  body { margin: 0; background: ${C.bg}; -webkit-tap-highlight-color: transparent; }
+  input, select, textarea, button { font-family: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  img { max-width: 100%; }
+  :focus-visible { outline: 2px solid ${C.orange}; outline-offset: 2px; }
+  ::placeholder { color: ${C.textFaint}; }
+  input:focus, select:focus { outline: none; border-color: ${C.orange} !important; box-shadow: 0 0 0 3px ${C.orangeSoft}; }
+
+  .df-app { min-height: 100dvh; background: ${C.bg}; color: ${C.text}; font-family: 'DM Sans', system-ui, sans-serif; padding-bottom: 32px; }
+  .df-app.has-cartbar { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+  .df-wrap { max-width: 1180px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .display, .hero-title, .secao-titulo, .painel-titulo, .df-brand-nome, .fome h2, .acomp-titulo, .rodape-nome { font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif; }
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .spin-loader { animation: spin-loader 1s linear infinite; }
+  @keyframes spin-loader { to { transform: rotate(360deg); } }
+
+  /* carregando */
+  .df-loading { min-height: 100dvh; background: ${C.bg}; display: flex; justify-content: center; padding: 40px 16px; }
+  .df-loading-inner { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .df-loading img { border-radius: 14px; margin-bottom: 10px; }
+  .sk { background: linear-gradient(90deg, ${C.card} 0%, ${C.cardAlt} 50%, ${C.card} 100%); background-size: 200% 100%; animation: sk 1.3s ease-in-out infinite; border-radius: 12px; }
+  .sk-title { width: 80%; height: 34px; }
+  .sk-line { width: 60%; height: 16px; }
+  .sk-grid { width: 100%; display: grid; gap: 12px; margin-top: 18px; }
+  .sk-card { height: 112px; border-radius: 18px; }
+  @keyframes sk { to { background-position: -200% 0; } }
+
+  /* botões */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 999px; padding: 11px 18px; font-size: 15px; font-weight: 700; white-space: nowrap; transition: transform .16s cubic-bezier(.2,.8,.2,1), background-color .16s ease, box-shadow .16s ease; }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
+  .btn:disabled { opacity: .55; }
+  .btn-lg { padding: 15px 24px; font-size: 16px; }
+  .btn-block { width: 100%; }
+  .btn-primary { background: ${C.orange}; color: ${C.ink}; box-shadow: 0 8px 24px -8px rgba(245,148,10,.65); }
+  .btn-primary:hover:not(:disabled) { background: #FFA42A; }
+  .btn-ghost { background: rgba(255,255,255,.04); color: ${C.text}; border-color: ${C.border}; }
+  .btn-ghost:hover { background: rgba(255,255,255,.08); }
+  .btn-link { background: none; color: ${C.textSoft}; margin-top: 6px; font-weight: 600; }
+  .icon-btn { background: ${C.cardAlt}; border: none; border-radius: 12px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: ${C.text}; flex-shrink: 0; }
+
+  /* cabeçalho */
+  .df-header { position: sticky; top: 0; z-index: 30; background: rgba(15,13,12,.82); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); border-bottom: 1px solid ${C.borderSoft}; }
+  .df-header-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 64px; }
+  .df-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .df-logo { border-radius: 12px; object-fit: contain; flex-shrink: 0; }
+  .df-brand-nome { font-size: 17px; font-weight: 800; letter-spacing: -.01em; line-height: 1.1; }
+  .status-selo { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; margin-top: 3px; color: ${C.textSoft}; }
+  .status-ponto { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .status-selo.is-on { color: ${C.green}; }
+  .status-selo.is-on .status-ponto { box-shadow: 0 0 0 0 rgba(52,211,153,.6); animation: pulso 2s ease-out infinite; }
+  .status-selo.is-urgente { color: ${C.orangeText}; }
+  .status-selo.is-agenda { color: ${C.orangeText}; }
+  .status-selo.is-off { color: ${C.red}; }
+  @keyframes pulso { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,.55); } 70%, 100% { box-shadow: 0 0 0 7px rgba(52,211,153,0); } }
+  .cart-btn { position: relative; width: 44px; height: 44px; border-radius: 999px; background: ${C.cardAlt}; border: 1px solid ${C.border}; color: ${C.text}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .cart-btn-count { position: absolute; top: -4px; right: -4px; background: ${C.orange}; color: ${C.ink}; font-size: 11.5px; font-weight: 800; min-width: 20px; height: 20px; border-radius: 999px; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
+  .bump { animation: bump .38s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes bump { 0% { transform: scale(.86); } 100% { transform: scale(1); } }
+
+  /* hero */
+  .hero { position: relative; }
+  .hero-grid { display: grid; padding: 0; }
+  .hero-stage { position: relative; height: min(56svh, 520px); min-height: 340px; overflow: hidden; background: #1A120C; isolation: isolate; }
+  .hero-slide { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transform: scale(1.12); transition: opacity 1s ease, transform 6.5s cubic-bezier(.2,.6,.3,1); }
+  .hero-slide.is-on { opacity: 1; transform: scale(1); }
+  .hero-stage-sombra { position: absolute; inset: -1px; pointer-events: none; z-index: 1; background:
+    linear-gradient(180deg, rgba(15,13,12,.55) 0%, rgba(15,13,12,0) 22%, rgba(15,13,12,0) 50%, rgba(15,13,12,.85) 88%, ${C.bg} 100%),
+    radial-gradient(120% 70% at 50% 110%, rgba(245,110,10,.35) 0%, rgba(245,110,10,0) 60%); }
+  .brasas { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+  .brasas span { position: absolute; bottom: -12px; border-radius: 50%; background: #FFB648; box-shadow: 0 0 6px 2px rgba(255,140,20,.85), 0 0 14px 4px rgba(245,90,10,.45); opacity: 0; animation: brasa linear infinite; will-change: transform, opacity; }
+  @keyframes brasa {
+    0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0; }
+    10% { opacity: 1; }
+    70% { opacity: .8; }
+    100% { transform: translate3d(var(--drift), -62svh, 0) scale(.3); opacity: 0; }
+  }
+  .story-bars { position: absolute; z-index: 3; top: 12px; left: 16px; right: 16px; display: flex; gap: 5px; }
+  .story-bars button { flex: 1; height: 16px; padding: 6px 0; border: none; background: none; }
+  .story-bars button span { display: block; height: 3px; border-radius: 3px; background: rgba(247,242,236,.3); position: relative; overflow: hidden; }
+  .story-bars button span::after { content: ""; position: absolute; inset: 0; background: ${C.text}; transform-origin: left; transform: scaleX(0); }
+  .story-bars button.is-done span::after { transform: scaleX(1); }
+  .story-bars button.is-on span::after { animation: story 5.2s linear forwards; }
+  @keyframes story { to { transform: scaleX(1); } }
+  .hero-produto { position: absolute; z-index: 3; left: 16px; right: 16px; bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 18px; border-radius: 999px;
+    background: rgba(24,19,16,.55); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(16px) saturate(170%); -webkit-backdrop-filter: blur(16px) saturate(170%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 12px 30px -10px rgba(0,0,0,.6); animation: produto-in .6s cubic-bezier(.16,1,.3,1) both; }
+  .hero-produto-info { min-width: 0; display: flex; flex-direction: column; }
+  .hero-produto-nome { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero-produto-preco { font-size: 14px; font-weight: 700; color: ${C.orangeText}; }
+  @keyframes produto-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  .hero-copy { position: relative; z-index: 1; padding: 6px 16px 0; }
+  .hero-title { font-size: clamp(31px, 8.6vw, 42px); line-height: 1.08; font-weight: 800; letter-spacing: -.028em; margin: 0; text-wrap: balance; }
+  .palavra { display: inline-block; animation: palavra .8s cubic-bezier(.16,1,.3,1) both; white-space: pre; padding-bottom: 4px; margin-bottom: -4px; }
+  .palavra.is-destaque { background: linear-gradient(100deg, #FFC24D 0%, ${C.orange} 45%, #FF6A1A 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  @keyframes palavra { from { opacity: 0; transform: translateY(.45em) rotate(2deg); filter: blur(6px); } to { opacity: 1; transform: none; filter: blur(0); } }
+  .hero-sub { font-size: 16px; line-height: 1.5; color: ${C.textSoft}; margin: 12px 0 0; max-width: 46ch; animation: sobe .7s cubic-bezier(.16,1,.3,1) .55s both; }
+  .hero-ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; animation: sobe .7s cubic-bezier(.16,1,.3,1) .65s both; }
+  .btn-brilho { position: relative; overflow: hidden; }
+  .btn-brilho::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; left: -60%; background: linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.45) 50%, rgba(255,255,255,0) 100%); transform: skewX(-20deg); animation: brilho 3.6s ease-in-out 1.6s infinite; }
+  @keyframes brilho { 0% { left: -60%; } 35%, 100% { left: 130%; } }
+  @keyframes sobe { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+  /* vantagens */
+  .vantagens { list-style: none; margin: 26px 0 8px; padding: 0; display: grid; gap: 10px; }
+  .vantagens li { display: flex; align-items: center; gap: 12px; font-size: 14.5px; color: ${C.textSoft}; }
+  .vantagens li svg { color: ${C.orange}; flex-shrink: 0; }
+  .vantagens strong { color: ${C.text}; font-weight: 700; }
+
+  /* avisos */
+  .aviso { display: flex; gap: 12px; border-radius: 18px; padding: 14px 16px; margin: 18px 0 0; border: 1px solid; }
+  .aviso svg { flex-shrink: 0; margin-top: 2px; }
+  .aviso strong { display: block; font-size: 15px; margin-bottom: 3px; }
+  .aviso p { margin: 0; font-size: 14px; line-height: 1.5; color: ${C.textSoft}; }
+  .aviso-off { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.4); color: ${C.red}; }
+  .aviso-off strong { color: ${C.red}; }
+  .aviso-agenda { background: ${C.orangeSoft}; border-color: rgba(245,148,10,.4); color: ${C.orangeText}; }
+  .aviso-erro { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.4); }
+  .aviso-erro p { color: ${C.red}; }
+
+  /* categorias */
+  .cats { position: sticky; top: 64px; z-index: 20; display: flex; gap: 8px; overflow-x: auto; padding: 12px 16px; margin: 18px -16px 0; background: rgba(15,13,12,.9); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  .cat-pill { flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; padding: 9px 15px; border-radius: 999px; font-size: 14px; font-weight: 700; border: 1px solid ${C.border}; background: ${C.card}; color: ${C.textSoft}; transition: background-color .16s ease, color .16s ease, border-color .16s ease, transform .16s ease; }
+  .cat-pill:active { transform: scale(.96); }
+  .cat-pill.is-active { background: ${C.text}; color: ${C.ink}; border-color: ${C.text}; }
+
+  /* produtos */
+  .secao { margin-top: 22px; scroll-margin-top: 132px; }
+  .secao-titulo { display: flex; align-items: center; gap: 9px; font-size: 21px; font-weight: 800; letter-spacing: -.015em; margin: 0 0 12px; }
+  .secao-titulo svg { color: ${C.orange}; }
+  .prod-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .prod { display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; background: ${C.card}; border: 1px solid ${C.borderSoft}; transition: border-color .2s ease, transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease; }
+  .prod.is-in-cart { border-color: rgba(245,148,10,.6); box-shadow: 0 10px 28px -14px rgba(245,148,10,.55); }
+  .prod-media { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #1F1712; }
+  .prod-img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .prod-img-fundo { position: absolute; inset: -12px; width: calc(100% + 24px); height: calc(100% + 24px); object-fit: cover; filter: blur(14px) brightness(.55) saturate(1.2); }
+  .prod-img.ph { position: absolute; inset: 0; }
+  .prod-qtd { position: absolute; top: 8px; right: 8px; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 999px; background: ${C.orange}; color: ${C.ink}; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+  .prod-body { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 11px 12px 12px; min-width: 0; }
+  .prod-nome { font-size: 15px; font-weight: 700; margin: 0; line-height: 1.25; }
+  .prod-desc { font-size: 12.5px; color: ${C.textSoft}; margin: 0; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .prod-body .selo-estoque { align-self: flex-start; margin-top: 2px; }
+  .prod-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 8px; }
+  .prod-preco { font-size: 16px; font-weight: 800; }
+  .prod-foot .stepper { margin-left: auto; }
+  .is-esgotado { filter: grayscale(1); opacity: .5; }
+  .ph { display: flex; align-items: center; justify-content: center; color: rgba(255,182,72,.55); background: radial-gradient(circle at 30% 20%, #3A2412 0%, #1F1712 70%); }
+  .add-fab { width: 40px; height: 40px; border-radius: 999px; border: none; background: ${C.orange}; color: ${C.ink}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 6px 16px -4px rgba(245,148,10,.7); transition: transform .16s cubic-bezier(.34,1.56,.64,1); }
+  .add-fab:hover { transform: scale(1.07); }
+  .add-fab:active { transform: scale(.88); }
+  .add-fab-sm { width: 32px; height: 32px; }
+  .acao-off { display: inline-block; font-size: 12px; font-weight: 700; color: ${C.textSoft}; background: ${C.cardAlt}; border: 1px solid ${C.border}; border-radius: 999px; padding: 5px 10px; }
+  .selo-estoque { display: inline-flex; font-size: 12px; font-weight: 700; color: ${C.orangeText}; background: ${C.orangeSoft}; border-radius: 999px; padding: 3px 9px; }
+
+  .stepper { display: inline-flex; align-items: center; gap: 2px; background: ${C.orange}; color: ${C.ink}; border-radius: 999px; padding: 3px; box-shadow: 0 6px 16px -4px rgba(245,148,10,.6); }
+  .stepper button { width: 30px; height: 30px; border: none; border-radius: 999px; background: rgba(20,15,12,.12); color: ${C.ink}; display: flex; align-items: center; justify-content: center; transition: transform .12s ease, background-color .12s ease; }
+  .stepper button:active:not(:disabled) { transform: scale(.85); }
+  .stepper button:disabled { opacity: .4; }
+  .stepper span { min-width: 22px; text-align: center; font-weight: 800; font-size: 15px; display: inline-block; font-variant-numeric: tabular-nums; }
+  .stepper-lg { padding: 4px; }
+  .stepper-lg button { width: 42px; height: 42px; }
+  .stepper-lg span { min-width: 30px; font-size: 17px; }
+  .stepper-sm { box-shadow: none; background: ${C.cardAlt}; color: ${C.text}; }
+  .stepper-sm button { width: 28px; height: 28px; background: transparent; color: ${C.text}; }
+  .stepper-sm button.is-plus { background: ${C.orange}; color: ${C.ink}; }
+  .qty-pop { animation: qty-pop .22s ease; }
+  @keyframes qty-pop { 0% { transform: scale(1.4); } 100% { transform: scale(1); } }
+
+  .vazio { text-align: center; padding: 44px 16px; color: ${C.textSoft}; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .vazio p { margin: 0; font-size: 15px; line-height: 1.5; max-width: 40ch; }
+  .vazio svg { color: ${C.textFaint}; }
+
+  /* chamada final */
+  .fome { margin-top: 40px; }
+  .fome-inner { position: relative; overflow: hidden; border-radius: 24px; min-height: 240px; display: flex; align-items: flex-end; background: radial-gradient(120% 140% at 100% 0%, #6B3A0C 0%, #2A1A0C 45%, ${C.card} 100%); border: 1px solid rgba(245,148,10,.28); }
+  .fome-mascote { position: absolute; right: -18px; top: -10px; width: 170px; height: auto; transform: rotate(8deg); opacity: .95; filter: drop-shadow(0 18px 30px rgba(0,0,0,.5)); }
+  .fome-copy { position: relative; z-index: 1; padding: 22px; padding-top: 120px; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+  .fome h2 { margin: 0; font-size: 26px; line-height: 1.1; font-weight: 800; letter-spacing: -.02em; max-width: 18ch; text-wrap: balance; }
+
+  /* rodapé */
+
+  .rodape { display: grid; gap: 18px; margin-top: 36px; padding-top: 26px; padding-bottom: 8px; border-top: 1px solid ${C.borderSoft}; color: ${C.textSoft}; font-size: 14px; }
+  .rodape-marca { display: flex; gap: 14px; align-items: center; }
+  .rodape-marca img { border-radius: 14px; flex-shrink: 0; }
+  .rodape-marca p { margin: 2px 0 0; line-height: 1.5; max-width: 40ch; }
+  .rodape-nome { font-size: 17px; font-weight: 800; color: ${C.text}; }
+  .rodape-whats { display: flex; align-items: center; gap: 12px; padding: 12px 16px 12px 12px; border-radius: 18px; background: rgba(37,211,102,.08); border: 1px solid rgba(37,211,102,.3); color: ${C.textSoft}; text-decoration: none; line-height: 1.4; transition: background-color .16s ease, border-color .16s ease; }
+  .rodape-whats:hover { background: rgba(37,211,102,.14); border-color: rgba(37,211,102,.5); }
+  .rodape-whats strong { display: block; color: ${C.text}; font-size: 15px; }
+  .rodape-whats-icone { width: 42px; height: 42px; border-radius: 999px; background: #25D366; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .rodape-pag-titulo { display: block; font-weight: 600; color: ${C.text}; margin-bottom: 8px; }
+  .rodape-pag-lista { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rodape-pag-lista span { font-size: 13px; font-weight: 600; padding: 5px 11px; border-radius: 999px; border: 1px solid ${C.border}; }
+  .rodape-copy { font-size: 12.5px; color: ${C.textFaint}; }
+
+  .whats-fab { position: fixed; z-index: 39; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; border-radius: 999px; background: #25D366; color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 28px -8px rgba(37,211,102,.7), 0 4px 12px rgba(0,0,0,.35); text-decoration: none; transition: transform .2s cubic-bezier(.34,1.56,.64,1), bottom .3s cubic-bezier(.16,1,.3,1); animation: whats-in .5s cubic-bezier(.34,1.56,.64,1) 1.2s both; }
+  .whats-fab:hover { transform: scale(1.06); }
+  .whats-fab:active { transform: scale(.94); }
+  .whats-fab.acima-cartbar { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  .whats-fab-dica { display: none; }
+  @keyframes whats-in { from { opacity: 0; transform: scale(.5); } to { opacity: 1; transform: none; } }
+  .link-whats { display: inline-flex; align-items: center; gap: 7px; margin-top: 12px; font-size: 13.5px; font-weight: 600; color: #4ADE80; text-decoration: none; }
+  .link-whats:hover { text-decoration: underline; }
+
+  /* painéis, carrinho e checkout */
+  .df-tela { padding-top: 16px; }
+  .tela-estreita { max-width: 560px; margin: 0 auto; }
+  .painel { background: ${C.card}; border: 1px solid ${C.borderSoft}; border-radius: 22px; padding: 18px; }
+  .painel-titulo { font-size: 19px; font-weight: 800; letter-spacing: -.01em; margin-bottom: 14px; }
+  .painel-vazio { text-align: center; color: ${C.textSoft}; padding: 18px 6px 8px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .painel-vazio svg { color: ${C.textFaint}; }
+  .painel-vazio p { margin: 0; font-size: 14px; line-height: 1.5; }
+  .cart-list { display: flex; flex-direction: column; gap: 12px; }
+  .cart-row { display: flex; align-items: center; gap: 12px; }
+  .cart-thumb { width: 54px; height: 54px; border-radius: 12px; object-fit: cover; flex-shrink: 0; }
+  .cart-row.is-compact .cart-thumb { width: 46px; height: 46px; }
+  .cart-row-info { flex: 1; min-width: 0; }
+  .cart-row-nome { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cart-row.is-compact .cart-row-nome { font-size: 14px; }
+  .cart-row-preco { font-size: 14px; color: ${C.textSoft}; margin-top: 2px; }
+  .total-linha { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 0; margin-top: 14px; border-top: 1px solid ${C.borderSoft}; font-size: 15px; color: ${C.textSoft}; font-weight: 600; }
+  .total-linha .num { color: ${C.text}; font-size: 19px; font-weight: 800; }
+  .total-grande .num { font-size: 22px; }
+  .tela-estreita > .total-linha { border-top: none; padding: 18px 4px 14px; }
+
+  .sugestoes { margin-top: 22px; }
+  .sugestoes-titulo { font-family: 'Bricolage Grotesque', sans-serif; font-size: 18px; font-weight: 800; margin-bottom: 12px; }
+  .sugestoes-scroll { display: flex; gap: 10px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 4px; scroll-snap-type: x mandatory; }
+  .sug-card { flex: 0 0 138px; scroll-snap-align: start; background: ${C.card}; border: 1px solid ${C.borderSoft}; border-radius: 18px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .sug-img { width: 100%; aspect-ratio: 1; border-radius: 12px; object-fit: cover; display: flex; }
+  .sug-nome { font-size: 13.5px; font-weight: 700; line-height: 1.3; min-height: 35px; padding: 0 2px; }
+  .sug-foot { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 2px; font-size: 14px; font-weight: 800; }
+
+  .checkout { display: flex; flex-direction: column; gap: 14px; }
+  .campo-grupo { background: ${C.card}; border: 1px solid ${C.borderSoft}; border-radius: 22px; padding: 18px; }
+  .campo-grupo-titulo { display: flex; align-items: center; gap: 9px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 17px; font-weight: 800; margin-bottom: 14px; }
+  .campo-grupo-titulo svg { color: ${C.orange}; }
+  .obrig { color: ${C.orangeText}; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 9px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; border: 1px solid ${C.border}; background: transparent; color: ${C.textSoft}; transition: all .15s ease; }
+  .chip.is-active { border-color: ${C.orange}; background: ${C.orangeSoft}; color: ${C.orangeText}; }
+  .segmento { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: ${C.cardAlt}; padding: 4px; border-radius: 999px; }
+  .segmento button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 11px; border-radius: 999px; border: none; background: transparent; color: ${C.textSoft}; font-size: 15px; font-weight: 700; transition: background-color .18s ease, color .18s ease; }
+  .segmento button.is-active { background: ${C.orange}; color: ${C.ink}; }
+  .dica { font-size: 13px; color: ${C.textSoft}; margin-top: 10px; line-height: 1.5; }
+  .dica-alerta { color: ${C.orangeText}; margin: 0 0 12px; }
+  .dica-erro { color: ${C.red}; margin: 0 0 12px; }
+  .cupom-ok { display: flex; justify-content: space-between; align-items: center; background: ${C.greenSoft}; border: 1px solid rgba(52,211,153,.5); border-radius: 12px; padding: 10px 12px; margin-bottom: 14px; color: ${C.green}; font-weight: 700; font-size: 14px; }
+  .cupom-ok span { display: inline-flex; align-items: center; gap: 6px; }
+  .cupom-ok button { background: none; border: none; color: ${C.green}; font-weight: 600; text-decoration: underline; }
+  .resumo-linha { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: ${C.textSoft}; margin-bottom: 6px; }
+  .resumo-linha .num { color: ${C.text}; }
+  .resumo-sep { border-top: 1px solid ${C.borderSoft}; padding-top: 10px; margin-top: 10px; }
+  .resumo-linha.is-desconto, .resumo-linha.is-desconto .num { color: ${C.green}; }
+  .garantia { display: flex; gap: 7px; align-items: flex-start; font-size: 13px; color: ${C.textSoft}; margin: 12px 0 0; line-height: 1.45; }
+  .garantia svg { color: ${C.green}; flex-shrink: 0; margin-top: 1px; }
+
+  /* acompanhar */
+  .icone-redondo { width: 60px; height: 60px; border-radius: 50%; background: ${C.orangeSoft}; color: ${C.orange}; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+  .icone-redondo.is-ok { background: ${C.greenSoft}; color: ${C.green}; }
+  .icone-redondo.is-erro { background: rgba(248,113,113,.14); color: ${C.red}; margin-bottom: 4px; }
+  .acomp-titulo { font-size: 22px; font-weight: 800; letter-spacing: -.015em; margin: 0 0 6px; color: ${C.text}; }
+  .acomp-total { font-size: 20px; font-weight: 800; color: ${C.orangeText}; }
+  .etapas { list-style: none; margin: 0; padding: 0; }
+  .etapa { display: flex; gap: 14px; position: relative; padding-bottom: 22px; }
+  .etapa:not(:last-child)::before { content: ""; position: absolute; left: 14px; top: 32px; bottom: 2px; width: 2px; background: ${C.border}; }
+  .etapa.is-feito::before { background: ${C.green}; }
+  .etapa-marca { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: ${C.cardAlt}; color: ${C.textFaint}; }
+  .etapa.is-feito .etapa-marca { background: ${C.greenSoft}; color: ${C.green}; }
+  .etapa.is-atual .etapa-marca { background: ${C.orangeSoft}; color: ${C.orange}; box-shadow: inset 0 0 0 2px ${C.orange}; }
+  .etapa-label { font-size: 15px; font-weight: 600; padding-top: 5px; }
+  .etapa.is-futuro .etapa-label { color: ${C.textFaint}; }
+  .etapa.is-atual .etapa-label { font-weight: 800; }
+  .etapa-sub { font-size: 13px; color: ${C.orangeText}; margin-top: 2px; }
+
+  /* barra do carrinho e aviso */
+  .cartbar { position: fixed; z-index: 40; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 18px 10px 10px; border: none; border-radius: 999px; background: ${C.orange}; color: ${C.ink}; box-shadow: 0 14px 34px -10px rgba(245,148,10,.75); animation: cartbar-in .32s cubic-bezier(.34,1.56,.64,1); }
+  .cartbar-qtd { min-width: 36px; height: 36px; border-radius: 999px; background: rgba(20,15,12,.16); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; }
+  .cartbar-label { flex: 1; text-align: left; font-size: 16px; font-weight: 800; }
+  .cartbar-total { font-size: 16px; font-weight: 800; }
+  @keyframes cartbar-in { from { transform: translateY(14px) scale(.97); } to { transform: none; } }
+  .toast { position: fixed; z-index: 41; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: inline-flex; align-items: center; gap: 7px; background: ${C.text}; color: ${C.ink}; font-size: 14px; font-weight: 700; padding: 9px 15px; border-radius: 999px; box-shadow: 0 10px 30px -8px rgba(0,0,0,.6); white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; animation: toast 1.8s cubic-bezier(.16,1,.3,1) both; }
+  .toast svg { color: #0E8F5C; flex-shrink: 0; }
+  @keyframes toast { 0% { opacity: 0; transform: translate(-50%, 10px); } 12%, 82% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 6px); } }
+
+  .df-cart-aside { display: none; }
+
+  @media (max-width: 859px) {
+    input, select, textarea { font-size: 16px !important; }
+    .df-checkout-aside { margin-top: 14px; }
+  }
+
+  @media (max-width: 359px) {
+    .prod-grid { grid-template-columns: 1fr; }
+    .hero-ctas .btn { width: 100%; }
+  }
+
+  @media (min-width: 640px) {
+    .vantagens { grid-template-columns: repeat(3, auto); justify-content: start; gap: 28px; }
+  }
+
+  @media (min-width: 860px) {
+    html { scroll-padding-top: 140px; }
+    .hero-grid { grid-template-columns: 1fr 1.08fr; align-items: center; gap: 56px; padding: 36px 16px 8px; }
+    .hero-stage { order: 2; height: auto; aspect-ratio: 5 / 4; min-height: 0; border-radius: 32px; box-shadow: 0 50px 100px -40px rgba(245,110,10,.55), inset 0 0 0 1px rgba(255,255,255,.06); }
+    .hero-stage-sombra { background: linear-gradient(180deg, rgba(15,13,12,.45) 0%, rgba(15,13,12,0) 25%, rgba(15,13,12,0) 60%, rgba(15,13,12,.7) 100%), radial-gradient(120% 70% at 50% 110%, rgba(245,110,10,.35) 0%, rgba(245,110,10,0) 60%); }
+    .hero-produto { left: 20px; right: auto; bottom: 20px; min-width: 300px; max-width: calc(100% - 40px); }
+    .story-bars { top: 16px; left: 20px; right: 20px; }
+    .hero-copy { order: 1; padding: 0; }
+    .hero-title { font-size: clamp(44px, 4.8vw, 62px); }
+    .hero-sub { font-size: 18px; }
+    .vantagens { margin-top: 32px; padding-bottom: 8px; }
+    .df-main-grid { display: grid; grid-template-columns: 1fr 360px; gap: 32px; align-items: start; }
+    .df-cart-aside { display: block; position: sticky; top: 88px; margin-top: 18px; }
+    .df-checkout-aside { position: sticky; top: 88px; }
+    .cats { top: 64px; margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; flex-wrap: wrap; }
+    .prod-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .prod:hover { border-color: ${C.border}; transform: translateY(-3px); }
+    .prod-nome { font-size: 16px; }
+    .prod.is-in-cart:hover { border-color: rgba(245,148,10,.7); }
+    .cartbar, .toast { display: none; }
+    .rodape { grid-template-columns: 1.3fr 1.2fr 1fr; align-items: center; gap: 28px; }
+    .rodape-copy { grid-column: 1 / -1; }
+    .whats-fab, .whats-fab.acima-cartbar { right: 24px; bottom: 24px; width: auto; padding: 0 20px 0 14px; gap: 10px; }
+    .whats-fab-dica { display: inline; font-size: 15px; font-weight: 700; }
+    .whats-fab:hover { transform: translateY(-2px); }
+    .df-app.has-cartbar { padding-bottom: 32px; }
+    .fome-inner { min-height: 280px; align-items: center; }
+    .fome-mascote { width: 260px; right: 48px; top: 50%; transform: translateY(-50%) rotate(6deg); }
+    .fome-copy { padding: 40px; }
+    .fome h2 { font-size: 36px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+    .spin-loader { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
+    .brasas, .btn-brilho::after { display: none; }
+    .hero-slide { transform: none !important; }
+  }
+`;

@@ -268,6 +268,18 @@ Se quiser fazer essa parte, me chama que eu te guio passo a passo igual fizemos 
 
 O banco usa as estruturas criadas pela migração da rodada 2 (executada à parte). O `supabase/schema.sql` deste projeto **não** foi atualizado com essas colunas.
 
+## Rodada 3 (novo visual do site do cliente, WhatsApp, loja aberta/fechada no banco)
+
+**Rode no SQL Editor do Supabase:** o arquivo [`supabase/migracao-loja-e-entrega.sql`](./supabase/migracao-loja-e-entrega.sql). Ele cria as colunas `loja_fechada`, `mensagem_loja_fechada`, `tempo_entrega_min`, `tempo_entrega_max` e `mostrar_tempo_entrega`, mais a trava que recusa pedidos com a loja fechada. Sem ele, o "Salvar configurações" do painel dá erro e o botão LOJA ABERTA / FECHADA não funciona. O `schema.sql` já inclui isso para projetos novos.
+
+**Site do cliente (`PedidoApp.jsx`)**
+- Topo com as fotos dos frangos e combos do cardápio passando sozinhas (estilo stories), com nome, preço e botão de adicionar.
+- Selo no cabeçalho com o horário do dia ("Aberto até 14:00", "Fecha em 35 min", "Aceitando encomendas", "Fechado agora"), lido dos horários do painel.
+- "Só restam N" quando o estoque cadastrado é 5 ou menos.
+- Sugestões de acompanhamentos e bebidas no carrinho.
+- Botão do WhatsApp (47) 99705-0828 para dúvidas (número em `WHATSAPP_NUMERO`, no topo do arquivo).
+- Fotos do cardápio carregadas em versão reduzida pelo serviço de imagens do Supabase (com volta automática para a original se falhar).
+
 ## O que já foi verificado
 
 Sintaxe de todo o JSX/JS validada (parsing completo, sem erros). Na rodada 2 os dois apps também foram renderizados num navegador de teste, contra um banco simulado, cobrindo pedidos ativos/histórico, cancelamento, compras com foto, loja fechada e tempo de entrega.
