@@ -90,7 +90,8 @@ create policy "cardapio escrita autenticada" on cardapio for insert with check (
 create policy "cardapio update autenticada" on cardapio for update using (auth.role() = 'authenticated');
 create policy "cardapio delete autenticada" on cardapio for delete using (auth.role() = 'authenticated');
 
-create policy "pedidos leitura publica" on pedidos for select using (true);
+-- leitura só pelo painel; o cliente vê o status do próprio pedido pela função status_pedido (abaixo)
+create policy "pedidos leitura autenticada" on pedidos for select using (auth.role() = 'authenticated');
 create policy "pedidos insercao publica" on pedidos for insert with check (true);
 create policy "pedidos update autenticada" on pedidos for update using (auth.role() = 'authenticated');
 
@@ -238,3 +239,11 @@ drop trigger if exists pedidos_bloqueia_loja_fechada on pedidos;
 create trigger pedidos_bloqueia_loja_fechada
   before insert on pedidos
   for each row execute function bloquear_pedido_loja_fechada();
+
+-- ---------- status do pedido para o cliente (igual a supabase/migracao-seguranca-pedidos.sql) ----------
+create or replace function status_pedido(p_id uuid)
+returns table (id uuid, status text, tipo_entrega text, total numeric, created_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select p.id, p.status, p.tipo_entrega, p.total, p.created_at from pedidos p where p.id = p_id;
+$$;
+grant execute on function status_pedido(uuid) to anon, authenticated;

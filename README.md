@@ -287,6 +287,10 @@ O banco usa as estruturas criadas pela migração da rodada 2 (executada à part
 - O site grava nome + WhatsApp assim que a pessoa preenche os dois no checkout, mesmo se ela desistir, e marca "fez pedido" quando envia.
 - No painel: busca, filtros (todos / fizeram pedido / não finalizaram pedido), botão para abrir a conversa e botão **Excel** que baixa a lista filtrada em `.csv`.
 
+## Segurança: pedidos só visíveis no painel
+
+**Rode no SQL Editor do Supabase (depois do site novo publicado):** [`supabase/migracao-seguranca-pedidos.sql`](./supabase/migracao-seguranca-pedidos.sql). Antes dele, qualquer pessoa com a chave pública do site conseguia ler nome, telefone e endereço de todos os pedidos. Depois, só o painel logado lê a tabela `pedidos`; o site grava o pedido com um id gerado no navegador e acompanha o status pela função `status_pedido` (consulta a cada 10 segundos).
+
 ## O que já foi verificado
 
 Sintaxe de todo o JSX/JS validada (parsing completo, sem erros). Na rodada 2 os dois apps também foram renderizados num navegador de teste, contra um banco simulado, cobrindo pedidos ativos/histórico, cancelamento, compras com foto, loja fechada e tempo de entrega.

@@ -152,6 +152,32 @@ const mapPedidoFromDb = (r) => ({
   createdAt: r.created_at,
 });
 
+// id do pedido gerado no navegador (UUID v4); é ele que permite ao cliente consultar só o próprio pedido
+const novoIdPedido = () => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+};
+
+// status de UM pedido pelo id, via função do banco (status_pedido). Se a função ainda não existir
+// (migração de segurança não rodada), cai na leitura direta antiga.
+const lerStatusPedido = async (id) => {
+  try {
+    const { data, error } = await supabase.rpc("status_pedido", { p_id: id });
+    if (!error) {
+      const linha = Array.isArray(data) ? data[0] : data;
+      return linha ? mapPedidoFromDb(linha) : null;
+    }
+    const antigo = await supabase.from("pedidos").select("id,status,tipo_entrega,total,created_at").eq("id", id).maybeSingle();
+    return antigo.data ? mapPedidoFromDb(antigo.data) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
 const ETAPAS = ["pendente", "aceito", "preparando", "pronto", "concluido"];
 
 const inputStyle = {
@@ -490,7 +516,11 @@ export default function PedidoApp() {
     setEnviando(true);
     try {
       const dataDoPedido = statusLoja.aberta ? new Date().toISOString().slice(0, 10) : diaEscolhido;
+      // o id é gerado aqui: assim o site não precisa ler a tabela de pedidos depois de gravar
+      // (a leitura da tabela é só do painel; o cliente consulta o próprio pedido por status_pedido)
+      const idPedido = novoIdPedido();
       const payload = {
+        id: idPedido,
         cliente_nome: form.nome.trim(),
         cliente_telefone: form.telefone.trim(),
         tipo_entrega: form.tipoEntrega,
@@ -511,7 +541,7 @@ export default function PedidoApp() {
         status: "pendente",
         data_pedido: dataDoPedido || null,
       };
-      const { data, error } = await supabase.from("pedidos").insert(payload).select().single();
+      const { error } = await supabase.from("pedidos").insert(payload);
       if (error) throw error;
 
       // baixa o estoque dos itens e contabiliza o uso do cupom (funções seguras no banco)
@@ -520,7 +550,7 @@ export default function PedidoApp() {
 
       registrarContato(true);
 
-      const pedido = mapPedidoFromDb(data);
+      const pedido = mapPedidoFromDb({ ...payload, created_at: new Date().toISOString() });
       setPedidoAtual(pedido);
       try {
         localStorage.setItem("divinoFrango_pedidoId", pedido.id);
@@ -567,10 +597,8 @@ export default function PedidoApp() {
         const id = localStorage.getItem("divinoFrango_pedidoId");
         const salvoEm = Number(localStorage.getItem("divinoFrango_pedidoSalvoEm") || 0);
         if (!id || Date.now() - salvoEm > 6 * 60 * 60 * 1000) return;
-        const { data, error } = await supabase.from("pedidos").select("*").eq("id", id).single();
-        if (error || !data) return;
-        const pedido = mapPedidoFromDb(data);
-        if (["pendente", "aceito", "preparando", "pronto"].includes(pedido.status)) {
+        const pedido = await lerStatusPedido(id);
+        if (pedido && ["pendente", "aceito", "preparando", "pronto"].includes(pedido.status)) {
           setPedidoAtual(pedido);
         }
       } catch (e) {
@@ -579,16 +607,25 @@ export default function PedidoApp() {
     })();
   }, []);
 
-  // acompanha o status do pedido atual em tempo real
+  // acompanha o status do pedido atual: consulta a cada 10s enquanto a tela está aberta
+  // (o tempo real do Supabase exige leitura da tabela inteira, que agora é só do painel)
   useEffect(() => {
     if (!pedidoAtual?.id || tela !== "acompanhar") return;
-    const canal = supabase
-      .channel(`pedido-${pedidoAtual.id}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "pedidos", filter: `id=eq.${pedidoAtual.id}` }, (payload) => {
-        setPedidoAtual(mapPedidoFromDb(payload.new));
-      })
-      .subscribe();
-    return () => supabase.removeChannel(canal);
+    const id = pedidoAtual.id;
+    let ativo = true;
+    const atualizar = async () => {
+      if (document.visibilityState !== "visible") return;
+      const atual = await lerStatusPedido(id);
+      if (ativo && atual) setPedidoAtual((p) => (p && p.id === id ? { ...p, status: atual.status } : p));
+    };
+    atualizar();
+    const t = setInterval(atualizar, 10000);
+    document.addEventListener("visibilitychange", atualizar);
+    return () => {
+      ativo = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", atualizar);
+    };
   }, [pedidoAtual?.id, tela]);
 
   // vitrine do topo: frangos e combos com foto cadastrada, passando sozinhos como "stories"
