@@ -438,6 +438,21 @@ export default function PedidoApp() {
     }
   };
 
+  // grava nome + WhatsApp na lista de contatos do painel (aba Contatos) assim que os dois estão
+  // preenchidos, mesmo que a pessoa desista do pedido; ao enviar, marca como "fez pedido".
+  // Falha em silêncio: nunca atrapalha o pedido (ex.: migração dos contatos ainda não rodada).
+  const ultimoContatoRef = useRef("");
+  const registrarContato = (fezPedido = false) => {
+    const nome = form.nome.trim();
+    if (nome.length < 2 || !telefoneCompleto(form.telefone)) return;
+    const chave = `${nome}|${form.telefone}|${fezPedido}`;
+    if (!fezPedido && ultimoContatoRef.current === chave) return;
+    ultimoContatoRef.current = chave;
+    supabase
+      .rpc("registrar_contato", { p_nome: nome, p_telefone: form.telefone, p_fez_pedido: fezPedido })
+      .then(() => {}, () => {});
+  };
+
   const enviarPedido = async () => {
     if (lojaFechada) {
       setTela("cardapio");
@@ -502,6 +517,8 @@ export default function PedidoApp() {
       // baixa o estoque dos itens e contabiliza o uso do cupom (funções seguras no banco)
       await Promise.all(itensCarrinho.map(({ item, qtd }) => supabase.rpc("decrementar_estoque", { p_item_id: item.id, p_quantidade: qtd })));
       if (cupomAplicado) await supabase.rpc("usar_cupom", { p_codigo: cupomAplicado.codigo });
+
+      registrarContato(true);
 
       const pedido = mapPedidoFromDb(data);
       setPedidoAtual(pedido);
@@ -1113,7 +1130,7 @@ export default function PedidoApp() {
               <div className="campo-grupo">
                 <div className="campo-grupo-titulo"><User size={17} /> Seus dados</div>
                 <label style={labelStyle} htmlFor="df-nome">Nome completo <span className="obrig">*</span></label>
-                <input id="df-nome" autoComplete="name" placeholder="Digite seu nome" value={form.nome} onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))} style={{ ...inputStyle, marginBottom: 12 }} />
+                <input id="df-nome" autoComplete="name" placeholder="Digite seu nome" value={form.nome} onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))} onBlur={() => registrarContato()} style={{ ...inputStyle, marginBottom: 12 }} />
                 <label style={labelStyle} htmlFor="df-tel">Telefone / WhatsApp <span className="obrig">*</span></label>
                 <input
                   id="df-tel"
@@ -1121,10 +1138,12 @@ export default function PedidoApp() {
                   placeholder="(11) 98765-4321"
                   value={form.telefone}
                   onChange={(e) => setForm((f) => ({ ...f, telefone: mascaraTelefone(e.target.value) }))}
+                  onBlur={() => registrarContato()}
                   inputMode="numeric"
                   maxLength={16}
                   style={inputStyle}
                 />
+                <p className="dica" style={{ marginTop: 10 }}>Usamos seu nome e telefone para o pedido e para falar com você sobre ele.</p>
               </div>
 
               <div className="campo-grupo">

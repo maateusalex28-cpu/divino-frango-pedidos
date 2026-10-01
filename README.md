@@ -280,6 +280,13 @@ O banco usa as estruturas criadas pela migração da rodada 2 (executada à part
 - Botão do WhatsApp (47) 99705-0828 para dúvidas (número em `WHATSAPP_NUMERO`, no topo do arquivo).
 - Fotos do cardápio carregadas em versão reduzida pelo serviço de imagens do Supabase (com volta automática para a original se falhar).
 
+## Contatos de clientes (aba Contatos do painel)
+
+**Rode no SQL Editor do Supabase:** [`supabase/migracao-contatos.sql`](./supabase/migracao-contatos.sql). Cria a tabela `contatos` (só o painel logado lê), a função `registrar_contato` usada pelo site e já importa quem fez pedido antes.
+
+- O site grava nome + WhatsApp assim que a pessoa preenche os dois no checkout, mesmo se ela desistir, e marca "fez pedido" quando envia.
+- No painel: busca, filtros (todos / fizeram pedido / não finalizaram pedido), botão para abrir a conversa e botão **Excel** que baixa a lista filtrada em `.csv`.
+
 ## O que já foi verificado
 
 Sintaxe de todo o JSX/JS validada (parsing completo, sem erros). Na rodada 2 os dois apps também foram renderizados num navegador de teste, contra um banco simulado, cobrindo pedidos ativos/histórico, cancelamento, compras com foto, loja fechada e tempo de entrega.

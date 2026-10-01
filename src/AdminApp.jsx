@@ -3,7 +3,7 @@ import {
   ClipboardList, UtensilsCrossed, Check, X, Trash2, Pencil, Loader2, Image as ImageIcon,
   Phone, Store, Bike, MapPin, Printer, Settings, Banknote, Clock, Wallet, ArrowDownCircle, ArrowUpCircle, Lock,
   LogOut, BarChart3, TrendingUp, TrendingDown, Package, Tag, Eye, EyeOff, Users, Briefcase,
-  Camera, Search, Ban, Plus,
+  Camera, Search, Ban, Plus, Contact, Download,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from "recharts";
 import { supabase } from "./supabaseClient";
@@ -124,6 +124,72 @@ const mapPedidoFromDb = (r) => ({
   motivoCancelamento: r.motivo_cancelamento || undefined,
   numero: r.numero ?? r.numero_pedido ?? null,
 });
+
+// ---------- mensagens prontas para o WhatsApp do cliente ----------
+// tipo: "confirmado" (ao aceitar) | "saiu" (saiu para entrega) | "retirada" (pronto para retirar)
+const montarMensagemWhatsApp = (p, tipo, tempoEntrega) => {
+  const nome = String(p.clienteNome || "").trim().split(/\s+/)[0] || "";
+  const cod = codigoPedido(p);
+  const itens = (p.itens || []).map((it) => `• ${it.qtd}x ${it.nome}`).join("\n");
+  const ehEntrega = p.tipoEntrega === "entrega";
+  const endereco = [p.endereco, p.bairro].filter(Boolean).join(" - ");
+  const troco = p.formaPagamento === "Dinheiro" && p.precisaTroco && p.trocoPara != null ? `\n💵 *Troco para:* ${fmt(p.trocoPara)}` : "";
+  const hoje = new Date().toISOString().slice(0, 10);
+  const agendado = p.dataPedido && p.dataPedido > hoje
+    ? new Date(p.dataPedido + "T00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" })
+    : null;
+
+  if (tipo === "confirmado") {
+    return [
+      `Olá, ${nome}! 🍗🔥`,
+      ``,
+      `Seu pedido *#${cod}* no *Divino Frango* foi *confirmado* ✅`,
+      ``,
+      `🧾 *Seu pedido:*`,
+      itens,
+      ``,
+      `💰 *Total:* ${fmt(p.total)}`,
+      `💳 *Pagamento:* ${p.formaPagamento}${troco}`,
+      ehEntrega ? `🛵 *Entrega em:* ${endereco}` : `🏪 *Retirada no balcão*`,
+      agendado ? `📅 *Agendado para:* ${agendado}` : null,
+      !agendado && ehEntrega && tempoEntrega ? `⏱️ *Previsão de entrega:* ${tempoEntrega}` : null,
+      ``,
+      agendado
+        ? `Vamos preparar tudo fresquinho para o dia combinado. Qualquer dúvida, é só chamar aqui! 😉`
+        : `Já estamos preparando tudo com muito carinho. Qualquer dúvida, é só chamar aqui! 😉`,
+    ].filter((l) => l !== null).join("\n");
+  }
+
+  if (tipo === "saiu") {
+    return [
+      `Oba, ${nome}! 🛵💨`,
+      ``,
+      `Seu pedido *#${cod}* do *Divino Frango* acabou de *sair para entrega*!`,
+      ``,
+      `📍 *Endereço:* ${endereco}`,
+      `💰 *Total:* ${fmt(p.total)} (${p.formaPagamento})${troco}`,
+      ``,
+      `Fica de olho, que o frango está chegando quentinho! 🍗🔥`,
+      `Bom apetite! 😋`,
+    ].join("\n");
+  }
+
+  return [
+    `${nome}, seu pedido está prontinho! 🎉`,
+    ``,
+    `O pedido *#${cod}* do *Divino Frango* já pode ser *retirado no balcão* 🏪`,
+    ``,
+    `💰 *Total:* ${fmt(p.total)} (${p.formaPagamento})${troco}`,
+    ``,
+    `Estamos te esperando, está quentinho! 🍗🔥`,
+  ].join("\n");
+};
+
+const linkWhatsAppCliente = (p, tipo, tempoEntrega) => {
+  let tel = String(p.clienteTelefone || "").replace(/\D/g, "");
+  if (tel.length === 10 || tel.length === 11) tel = `55${tel}`;
+  return `https://wa.me/${tel}?text=${encodeURIComponent(montarMensagemWhatsApp(p, tipo, tempoEntrega))}`;
+};
 
 const mapCardapioFromDb = (r) => ({
   id: r.id,
@@ -750,6 +816,83 @@ export default function AdminApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // ---------- contatos de clientes (nome + WhatsApp vindos do checkout do site) ----------
+  const [contatos, setContatos] = useState([]);
+  const [carregandoContatos, setCarregandoContatos] = useState(false);
+  const [erroContatos, setErroContatos] = useState("");
+  const [buscaContato, setBuscaContato] = useState("");
+  const [filtroContato, setFiltroContato] = useState("todos"); // todos | com_pedido | sem_pedido
+
+  const carregarContatos = async () => {
+    setCarregandoContatos(true);
+    setErroContatos("");
+    try {
+      const { data, error } = await supabase.from("contatos").select("*").order("ultimo_contato", { ascending: false });
+      if (error) throw error;
+      setContatos(data || []);
+    } catch (e) {
+      setErroContatos("Não foi possível carregar os contatos. Confira se o arquivo supabase/migracao-contatos.sql já foi rodado no Supabase.");
+    } finally {
+      setCarregandoContatos(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "contatos") carregarContatos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const telefoneLegivel = (t) => {
+    const d = String(t || "").replace(/\D/g, "");
+    if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+    if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return t;
+  };
+
+  const contatosFiltrados = useMemo(() => {
+    const termo = String(buscaContato || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    const termoDigitos = termo.replace(/\D/g, "");
+    return contatos.filter((c) => {
+      if (filtroContato === "com_pedido" && !c.fez_pedido) return false;
+      if (filtroContato === "sem_pedido" && c.fez_pedido) return false;
+      if (!termo) return true;
+      const nome = String(c.nome || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+      return nome.includes(termo) || (termoDigitos && c.telefone.includes(termoDigitos));
+    });
+  }, [contatos, buscaContato, filtroContato]);
+
+  // planilha .csv (abre direto no Excel): separador ";" e BOM para os acentos saírem certos
+  const exportarContatos = () => {
+    const lista = contatosFiltrados;
+    if (lista.length === 0) { showToast("Nenhum contato para exportar"); return; }
+    const dataBR = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR") : "");
+    const celula = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const linhas = [
+      ["Nome", "WhatsApp", "WhatsApp com 55", "Fez pedido", "Qtd. de pedidos", "Primeiro contato", "Último contato"],
+      ...lista.map((c) => [
+        // ="..." faz o Excel tratar como texto (senão mostra 5,55E+12 no lugar do número)
+        c.nome, telefoneLegivel(c.telefone), `="55${c.telefone}"`,
+        c.fez_pedido ? "Sim" : "Não", c.total_pedidos, dataBR(c.primeiro_contato), dataBR(c.ultimo_contato),
+      ]),
+    ];
+    const csv = "﻿" + linhas.map((l) => l.map(celula).join(";")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `contatos-divino-frango-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const removerContato = async (c) => {
+    if (!window.confirm(`Apagar ${c.nome} da lista de contatos?`)) return;
+    const { error } = await supabase.from("contatos").delete().eq("id", c.id);
+    if (error) { showToast("Erro ao apagar contato"); return; }
+    setContatos((lista) => lista.filter((x) => x.id !== c.id));
+  };
+
   // busca de preço: procura pelo nome do produto em todas as compras já lançadas
   const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   const resultadosBuscaCompra = useMemo(() => {
@@ -1303,6 +1446,14 @@ export default function AdminApp() {
     const podeCancelar = ["aceito", "preparando", "pronto"].includes(p.status);
     const rotuloPronto = p.tipoEntrega === "entrega" ? "Saiu para entrega" : "Pronto para retirada";
     const trocoVisivel = p.formaPagamento === "Dinheiro" && p.precisaTroco && p.trocoPara != null;
+    // WhatsApp do cliente com a mensagem pronta: abre junto com o clique (precisa ser no mesmo
+    // toque, senão o navegador bloqueia a nova aba); a pessoa só aperta enviar
+    const tempoEntregaTexto = mostrarTempoEntrega && Number(tempoEntregaMin) > 0
+      ? (tempoEntregaMin === tempoEntregaMax ? `${tempoEntregaMin} min` : `${tempoEntregaMin} a ${tempoEntregaMax} min`)
+      : null;
+    const tipoAvisoPronto = p.tipoEntrega === "entrega" ? "saiu" : "retirada";
+    const abrirWhatsApp = (tipo) => window.open(linkWhatsAppCliente(p, tipo, tempoEntregaTexto), "_blank", "noopener");
+    const avisoAtual = ["aceito", "preparando"].includes(p.status) ? "confirmado" : p.status === "pronto" ? tipoAvisoPronto : null;
     return (
       <Card key={p.id} style={p.status === "pendente" ? { borderColor: C.orange, borderWidth: 1.5 } : {}}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -1378,14 +1529,14 @@ export default function AdminApp() {
           {p.status === "pendente" && (
             <>
               <button onClick={() => recusarPedido(p.id)} style={{ ...btnOutline, flex: 1 }}>Recusar</button>
-              <button onClick={() => aceitarPedido(p.id)} style={{ ...btnPrimary, flex: 1 }}><Check size={15} /> Aceitar</button>
+              <button onClick={() => { abrirWhatsApp("confirmado"); aceitarPedido(p.id); }} style={{ ...btnPrimary, flex: 1 }}><Check size={15} /> Aceitar</button>
             </>
           )}
           {p.status === "aceito" && (
             <button onClick={() => iniciarPreparoPedido(p.id)} style={{ ...btnPrimary, flex: 1 }}><Check size={15} /> Iniciar preparo</button>
           )}
           {p.status === "preparando" && (
-            <button onClick={() => marcarProntoPedido(p)} style={{ ...btnPrimary, flex: 1 }}>
+            <button onClick={() => { abrirWhatsApp(tipoAvisoPronto); marcarProntoPedido(p); }} style={{ ...btnPrimary, flex: 1 }}>
               <Check size={15} /> {p.tipoEntrega === "entrega" ? "Saiu para entrega" : "Pronto para retirada"}
             </button>
           )}
@@ -1400,6 +1551,14 @@ export default function AdminApp() {
             <Printer size={15} />
           </button>
         </div>
+        {avisoAtual && (
+          <button
+            onClick={() => abrirWhatsApp(avisoAtual)}
+            style={{ ...btnOutline, width: "100%", marginTop: 8, borderColor: "rgba(37,211,102,0.5)", color: "#25D366" }}
+          >
+            <Phone size={15} /> {avisoAtual === "confirmado" ? "Enviar confirmação no WhatsApp" : avisoAtual === "saiu" ? "Avisar que saiu para entrega" : "Avisar que está pronto"}
+          </button>
+        )}
         {podeCancelar && (
           <button onClick={() => abrirCancelamento(p)} style={{ ...btnOutline, width: "100%", marginTop: 8, borderColor: C.red, color: C.red }}>
             <Ban size={15} /> Cancelar pedido
@@ -2110,6 +2269,92 @@ export default function AdminApp() {
           </>
         )}
 
+        {tab === "contatos" && (
+          <>
+            <Card style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Contatos de clientes</div>
+                  <div style={{ fontSize: 12, color: C.textSoft, marginTop: 2 }}>Quem preencheu nome e WhatsApp no site, com ou sem pedido.</div>
+                </div>
+                <button onClick={exportarContatos} style={{ ...btnPrimary, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}>
+                  <Download size={16} /> Excel
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <MiniStat label="Contatos" value={contatos.length} />
+                <MiniStat label="Fizeram pedido" value={contatos.filter((c) => c.fez_pedido).length} />
+                <MiniStat label="Sem pedido" value={contatos.filter((c) => !c.fez_pedido).length} />
+              </div>
+              <div style={{ position: "relative", marginBottom: 10 }}>
+                <Search size={15} color={C.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+                <input placeholder="Buscar por nome ou telefone" value={buscaContato} onChange={(e) => setBuscaContato(e.target.value)} style={{ ...inputStyle, paddingLeft: 34 }} />
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  { id: "todos", label: "Todos" },
+                  { id: "com_pedido", label: "Fizeram pedido" },
+                  { id: "sem_pedido", label: "Não finalizaram pedido" },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setFiltroContato(f.id)}
+                    style={{
+                      fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 999,
+                      border: `1px solid ${filtroContato === f.id ? C.orange : C.border}`,
+                      background: filtroContato === f.id ? C.orangeSoft : "transparent",
+                      color: filtroContato === f.id ? C.orange : C.textSoft,
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 10, lineHeight: 1.45 }}>
+                O botão Excel baixa a lista do filtro escolhido.
+              </div>
+            </Card>
+
+            {erroContatos && <EmptyState text={erroContatos} />}
+            {carregandoContatos && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: C.textSoft }}><Loader2 size={20} className="spin" /></div>
+            )}
+            {!carregandoContatos && !erroContatos && contatosFiltrados.length === 0 && (
+              <EmptyState text={contatos.length === 0 ? "Nenhum contato ainda. Eles aparecem aqui quando alguém preenche nome e WhatsApp no site." : "Nenhum contato com esse filtro."} />
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {!carregandoContatos && contatosFiltrados.map((c) => (
+                <Card key={c.id} style={{ padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nome}</div>
+                      <div className="mono" style={{ fontSize: 12.5, color: C.textSoft, marginTop: 1 }}>{telefoneLegivel(c.telefone)}</div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: c.fez_pedido ? C.greenSoft : C.orangeSoft, color: c.fez_pedido ? C.green : C.orange }}>
+                          {c.fez_pedido ? `${c.total_pedidos} ${c.total_pedidos === 1 ? "pedido" : "pedidos"}` : "Não finalizou pedido"}
+                        </span>
+                        <span style={{ fontSize: 10.5, color: C.textFaint, padding: "2px 0" }}>{new Date(c.ultimo_contato).toLocaleDateString("pt-BR")}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <a
+                        href={`https://wa.me/55${c.telefone}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ ...iconBtnStyle, width: 34, height: 34, borderRadius: 10, background: "rgba(37,211,102,0.14)" }}
+                        aria-label={`Abrir conversa com ${c.nome} no WhatsApp`}
+                      >
+                        <Phone size={15} color="#25D366" />
+                      </a>
+                      <button onClick={() => removerContato(c)} style={iconBtnStyle} aria-label={`Apagar ${c.nome}`}><Trash2 size={14} color={C.textFaint} /></button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
         {tab === "relatorios" && (
           <>
             {carregandoRelatorio ? (
@@ -2546,6 +2791,7 @@ export default function AdminApp() {
             { id: "equipe", label: "Equipe", icon: Users },
             { id: "relatorios", label: "Relatórios", icon: BarChart3 },
             { id: "cardapio", label: "Cardápio", icon: UtensilsCrossed },
+            { id: "contatos", label: "Contatos", icon: Contact },
           ].map(({ id, label, icon: Icon, badge }) => {
             const ativo = tab === id;
             return (
