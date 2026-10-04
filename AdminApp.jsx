@@ -3,7 +3,7 @@ import {
   ClipboardList, UtensilsCrossed, Check, X, Trash2, Pencil, Loader2, Image as ImageIcon,
   Phone, Store, Bike, MapPin, Printer, Settings, Banknote, Clock, Wallet, ArrowDownCircle, ArrowUpCircle, Lock,
   LogOut, BarChart3, TrendingUp, TrendingDown, Package, Tag, Eye, EyeOff, Users, Briefcase,
-  Camera, Search, Ban, Plus,
+  Camera, Search, Ban, Plus, Contact, Download,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from "recharts";
 import { supabase } from "./supabaseClient";
@@ -29,6 +29,84 @@ const fmtDataHora = (iso) => (iso ? `${fmtData(iso)} às ${fmtHora(iso)}` : "");
 const fmtDataSimples = (yyyyMMdd) => (yyyyMMdd ? new Date(`${yyyyMMdd}T00:00`).toLocaleDateString("pt-BR") : "");
 const fmtQtd = (n) => Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 const rotuloUnidade = (u) => (/^k/i.test(String(u || "")) ? "kg" : "un");
+
+// prepara a foto do cupom para leitura por IA: largura 1000px e, se a foto for comprida, divide em
+// partes de ~1150px de altura com pequena sobreposição (a IA reduz imagens grandes e o texto miúdo
+// do cupom perderia a leitura). Devolve de 1 a 8 imagens JPEG em base64 (sem o prefixo data:).
+const prepararImagensCupom = (file) =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const LARG = 1000, ALT = 1150, SOBRA = 120, MAX_PARTES = 8;
+        let escala = Math.min(1, LARG / img.naturalWidth);
+        const limiteAltura = ALT + (ALT - SOBRA) * (MAX_PARTES - 1);
+        if (img.naturalHeight * escala > limiteAltura) escala = limiteAltura / img.naturalHeight;
+        const w = Math.max(1, Math.round(img.naturalWidth * escala));
+        const h = Math.max(1, Math.round(img.naturalHeight * escala));
+        const inteira = document.createElement("canvas");
+        inteira.width = w;
+        inteira.height = h;
+        inteira.getContext("2d").drawImage(img, 0, 0, w, h);
+        const partes = [];
+        for (let y = 0; y < h; y += ALT - SOBRA) {
+          const altura = Math.min(ALT, h - y);
+          const c = document.createElement("canvas");
+          c.width = w;
+          c.height = altura;
+          c.getContext("2d").drawImage(inteira, 0, y, w, altura, 0, 0, w, altura);
+          partes.push(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+          if (y + altura >= h) break;
+        }
+        URL.revokeObjectURL(url);
+        resolve(partes);
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("foto ilegível")); };
+    img.src = url;
+  });
+
+// preço por kg (ou por unidade) de um item de compra. Usa o valor do próprio item quando foi informado;
+// numa compra com um só produto, usa o valor total da compra.
+const precoPorUnidade = (compra, it, totalItens) => {
+  const q = Number(it.quantidade ?? it.qtd ?? 0);
+  const v = it.valor != null && it.valor !== "" ? Number(it.valor) : totalItens === 1 ? Number(compra.valor) : null;
+  return v != null && q > 0 && v > 0 ? v / q : null;
+};
+
+// reduz a foto (lado maior 2600px, JPEG) antes de enviar: foto de câmera costuma ter vários MB.
+// O cupom fiscal é longo e estreito, por isso o limite é alto: com menos, o texto miúdo perde a leitura.
+const reduzirFoto = (file, maxLado = 2600, qualidade = 0.85) =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const escala = Math.min(1, maxLado / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * escala));
+        const h = Math.max(1, Math.round(img.naturalHeight * escala));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          if (!blob) { reject(new Error("não foi possível reduzir a foto")); return; }
+          const nome = ((file.name || "nota").replace(/\.[^.]+$/, "") || "nota") + ".jpg";
+          resolve(new File([blob], nome, { type: "image/jpeg" }));
+        }, "image/jpeg", qualidade);
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("foto ilegível")); };
+    img.src = url;
+  });
 
 // A tabela de pedidos identifica cada pedido por um UUID. Se existir uma coluna de número
 // sequencial, ela é usada; senão mostramos um código curto e estável tirado do UUID.
@@ -124,6 +202,72 @@ const mapPedidoFromDb = (r) => ({
   motivoCancelamento: r.motivo_cancelamento || undefined,
   numero: r.numero ?? r.numero_pedido ?? null,
 });
+
+// ---------- mensagens prontas para o WhatsApp do cliente ----------
+// tipo: "confirmado" (ao aceitar) | "saiu" (saiu para entrega) | "retirada" (pronto para retirar)
+const montarMensagemWhatsApp = (p, tipo, tempoEntrega) => {
+  const nome = String(p.clienteNome || "").trim().split(/\s+/)[0] || "";
+  const cod = codigoPedido(p);
+  const itens = (p.itens || []).map((it) => `• ${it.qtd}x ${it.nome}`).join("\n");
+  const ehEntrega = p.tipoEntrega === "entrega";
+  const endereco = [p.endereco, p.bairro].filter(Boolean).join(" - ");
+  const troco = p.formaPagamento === "Dinheiro" && p.precisaTroco && p.trocoPara != null ? `\n💵 *Troco para:* ${fmt(p.trocoPara)}` : "";
+  const hoje = new Date().toISOString().slice(0, 10);
+  const agendado = p.dataPedido && p.dataPedido > hoje
+    ? new Date(p.dataPedido + "T00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" })
+    : null;
+
+  if (tipo === "confirmado") {
+    return [
+      `Olá, ${nome}! 🍗🔥`,
+      ``,
+      `Seu pedido *#${cod}* no *Divino Frango* foi *confirmado* ✅`,
+      ``,
+      `🧾 *Seu pedido:*`,
+      itens,
+      ``,
+      `💰 *Total:* ${fmt(p.total)}`,
+      `💳 *Pagamento:* ${p.formaPagamento}${troco}`,
+      ehEntrega ? `🛵 *Entrega em:* ${endereco}` : `🏪 *Retirada no balcão*`,
+      agendado ? `📅 *Agendado para:* ${agendado}` : null,
+      !agendado && ehEntrega && tempoEntrega ? `⏱️ *Previsão de entrega:* ${tempoEntrega}` : null,
+      ``,
+      agendado
+        ? `Vamos preparar tudo fresquinho para o dia combinado. Qualquer dúvida, é só chamar aqui! 😉`
+        : `Já estamos preparando tudo com muito carinho. Qualquer dúvida, é só chamar aqui! 😉`,
+    ].filter((l) => l !== null).join("\n");
+  }
+
+  if (tipo === "saiu") {
+    return [
+      `Oba, ${nome}! 🛵💨`,
+      ``,
+      `Seu pedido *#${cod}* do *Divino Frango* acabou de *sair para entrega*!`,
+      ``,
+      `📍 *Endereço:* ${endereco}`,
+      `💰 *Total:* ${fmt(p.total)} (${p.formaPagamento})${troco}`,
+      ``,
+      `Fica de olho, que o frango está chegando quentinho! 🍗🔥`,
+      `Bom apetite! 😋`,
+    ].join("\n");
+  }
+
+  return [
+    `${nome}, seu pedido está prontinho! 🎉`,
+    ``,
+    `O pedido *#${cod}* do *Divino Frango* já pode ser *retirado no balcão* 🏪`,
+    ``,
+    `💰 *Total:* ${fmt(p.total)} (${p.formaPagamento})${troco}`,
+    ``,
+    `Estamos te esperando, está quentinho! 🍗🔥`,
+  ].join("\n");
+};
+
+const linkWhatsAppCliente = (p, tipo, tempoEntrega) => {
+  let tel = String(p.clienteTelefone || "").replace(/\D/g, "");
+  if (tel.length === 10 || tel.length === 11) tel = `55${tel}`;
+  return `https://wa.me/${tel}?text=${encodeURIComponent(montarMensagemWhatsApp(p, tipo, tempoEntrega))}`;
+};
 
 const mapCardapioFromDb = (r) => ({
   id: r.id,
@@ -455,13 +599,24 @@ export default function AdminApp() {
   const atualizarStatusPedido = async (id, status, extra = {}, mensagem) => {
     const tentar = (patch) => supabase.from("pedidos").update({ status, ...patch }).eq("id", id).select().single();
     let { data: updated, error } = await tentar(extra);
-    // se o banco não tiver a coluna concluido_em, conclui o pedido mesmo assim (só não grava o horário)
-    if (error && "concluido_em" in extra && (error.code === "PGRST204" || /concluido_em/i.test(error.message || ""))) {
-      console.warn("Coluna concluido_em não encontrada em pedidos; concluindo sem gravar o horário de conclusão.");
-      const { concluido_em: _ignorado, ...semConclusao } = extra;
-      ({ data: updated, error } = await tentar(semConclusao));
+    // se o banco ainda não tiver alguma coluna opcional (pronto_em, concluido_em, cancelado_em, motivo_cancelamento),
+    // atualiza o status mesmo assim — só não grava aquele horário/motivo
+    let patch = { ...extra };
+    for (let i = 0; i < 4 && error; i++) {
+      const faltando = Object.keys(patch).find((col) => new RegExp(col, "i").test(error.message || ""));
+      if (!faltando || !(error.code === "PGRST204" || /column|schema cache/i.test(error.message || ""))) break;
+      console.warn(`Coluna ${faltando} não encontrada em pedidos; atualizando o status sem gravar ela.`);
+      const { [faltando]: _ignorado, ...resto } = patch;
+      patch = resto;
+      ({ data: updated, error } = await tentar(patch));
     }
-    if (error) { showToast("Erro ao atualizar pedido"); console.error(error); return false; }
+    if (error) {
+      console.error(error);
+      // 0 linhas alteradas (sessão expirada / sem permissão / pedido já removido): explica o motivo
+      if (error.code === "PGRST116" || /coerce/i.test(error.message || "")) await avisarFalhaAtualizacao();
+      else showToast(`Erro ao atualizar pedido: ${error.message}`);
+      return false;
+    }
     setPedidos((prev) => prev.map((p) => (p.id === id ? mapPedidoFromDb(updated) : p)));
     showToast(mensagem || `Pedido: ${LABEL_STATUS[status] || status}`);
     return true;
@@ -597,6 +752,16 @@ export default function AdminApp() {
     setFormCardapio({ nome: item.nome, descricao: item.descricao, preco: String(item.preco), categoria: item.categoria, estoque: item.estoque == null ? "" : String(item.estoque) });
   };
 
+  // quando o Supabase não devolve nenhuma linha no update (sessão expirada, sem permissão ou item já removido)
+  const avisarFalhaAtualizacao = async () => {
+    const { data } = await supabase.auth.getSession();
+    showToast(
+      data && data.session
+        ? "Não foi possível salvar: o registro não existe mais ou você não tem permissão. Atualize a página e tente de novo."
+        : "Sua sessão expirou. Saia e entre de novo no painel."
+    );
+  };
+
   const salvarItemCardapio = async (fotoUrlOverride) => {
     if (!formCardapio.nome.trim() || !formCardapio.preco) return;
     const payload = {
@@ -614,8 +779,9 @@ export default function AdminApp() {
         .update(mapCardapioInsert({ ...payload, fotoUrl: fotoUrlOverride ?? atual?.fotoUrl }))
         .eq("id", editandoCardapioId)
         .select()
-        .single();
+        .maybeSingle();
       if (error) { showToast(`Erro ao salvar: ${error.message}`); console.error(error); return; }
+      if (!updated) { await avisarFalhaAtualizacao(); return; }
       setCardapio((prev) => prev.map((c) => (c.id === editandoCardapioId ? mapCardapioFromDb(updated) : c)));
       showToast("Item atualizado");
     } else {
@@ -656,8 +822,9 @@ export default function AdminApp() {
       .update({ disponivel: !item.disponivel })
       .eq("id", item.id)
       .select()
-      .single();
-    if (error || !updated) { showToast("Não foi possível alterar o produto"); return; }
+      .maybeSingle();
+    if (error) { showToast("Não foi possível alterar o produto"); return; }
+    if (!updated) { await avisarFalhaAtualizacao(); return; }
     setCardapio((prev) => prev.map((c) => (c.id === item.id ? mapCardapioFromDb(updated) : c)));
     showToast(updated.disponivel ? `${item.nome} ativado no cardápio` : `${item.nome} desativado — some do cardápio do cliente`);
   };
@@ -674,7 +841,6 @@ export default function AdminApp() {
   const [carregandoCaixa, setCarregandoCaixa] = useState(true);
 
   const [valorAberturaForm, setValorAberturaForm] = useState("");
-  const [formVendaBalcao, setFormVendaBalcao] = useState({ valor: "", formaPagamento: "Dinheiro", descricao: "" });
   const [formMovimento, setFormMovimento] = useState({ tipo: "suprimento", valor: "", descricao: "" });
   const [comprasRecentes, setComprasRecentes] = useState([]); // últimas compras de todos os turnos (para rever a nota depois)
   const [historicoCompras, setHistoricoCompras] = useState([]); // todas as compras (para a busca de preço por produto)
@@ -727,6 +893,83 @@ export default function AdminApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // ---------- contatos de clientes (nome + WhatsApp vindos do checkout do site) ----------
+  const [contatos, setContatos] = useState([]);
+  const [carregandoContatos, setCarregandoContatos] = useState(false);
+  const [erroContatos, setErroContatos] = useState("");
+  const [buscaContato, setBuscaContato] = useState("");
+  const [filtroContato, setFiltroContato] = useState("todos"); // todos | com_pedido | sem_pedido
+
+  const carregarContatos = async () => {
+    setCarregandoContatos(true);
+    setErroContatos("");
+    try {
+      const { data, error } = await supabase.from("contatos").select("*").order("ultimo_contato", { ascending: false });
+      if (error) throw error;
+      setContatos(data || []);
+    } catch (e) {
+      setErroContatos("Não foi possível carregar os contatos. Confira se o arquivo supabase/migracao-contatos.sql já foi rodado no Supabase.");
+    } finally {
+      setCarregandoContatos(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "contatos") carregarContatos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const telefoneLegivel = (t) => {
+    const d = String(t || "").replace(/\D/g, "");
+    if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+    if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return t;
+  };
+
+  const contatosFiltrados = useMemo(() => {
+    const termo = String(buscaContato || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    const termoDigitos = termo.replace(/\D/g, "");
+    return contatos.filter((c) => {
+      if (filtroContato === "com_pedido" && !c.fez_pedido) return false;
+      if (filtroContato === "sem_pedido" && c.fez_pedido) return false;
+      if (!termo) return true;
+      const nome = String(c.nome || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+      return nome.includes(termo) || (termoDigitos && c.telefone.includes(termoDigitos));
+    });
+  }, [contatos, buscaContato, filtroContato]);
+
+  // planilha .csv (abre direto no Excel): separador ";" e BOM para os acentos saírem certos
+  const exportarContatos = () => {
+    const lista = contatosFiltrados;
+    if (lista.length === 0) { showToast("Nenhum contato para exportar"); return; }
+    const dataBR = (iso) => (iso ? new Date(iso).toLocaleString("pt-BR") : "");
+    const celula = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const linhas = [
+      ["Nome", "WhatsApp", "WhatsApp com 55", "Fez pedido", "Qtd. de pedidos", "Primeiro contato", "Último contato"],
+      ...lista.map((c) => [
+        // ="..." faz o Excel tratar como texto (senão mostra 5,55E+12 no lugar do número)
+        c.nome, telefoneLegivel(c.telefone), `="55${c.telefone}"`,
+        c.fez_pedido ? "Sim" : "Não", c.total_pedidos, dataBR(c.primeiro_contato), dataBR(c.ultimo_contato),
+      ]),
+    ];
+    const csv = "﻿" + linhas.map((l) => l.map(celula).join(";")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `contatos-divino-frango-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const removerContato = async (c) => {
+    if (!window.confirm(`Apagar ${c.nome} da lista de contatos?`)) return;
+    const { error } = await supabase.from("contatos").delete().eq("id", c.id);
+    if (error) { showToast("Erro ao apagar contato"); return; }
+    setContatos((lista) => lista.filter((x) => x.id !== c.id));
+  };
+
   // busca de preço: procura pelo nome do produto em todas as compras já lançadas
   const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   const resultadosBuscaCompra = useMemo(() => {
@@ -746,7 +989,7 @@ export default function AdminApp() {
           qtd,
           unidade: it.unidade,
           total: m.valor,
-          precoUnit: unico && qtd > 0 ? m.valor / qtd : null,
+          precoUnit: precoPorUnidade(m, it, itens.length),
           data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""),
           varios: !unico,
           compra: m,
@@ -842,20 +1085,6 @@ export default function AdminApp() {
 
   const totalDiarias = useMemo(() => diarias.reduce((s, d) => s + d.valor, 0), [diarias]);
 
-  const lancarVendaBalcao = async () => {
-    if (!formVendaBalcao.valor) return;
-    const mov = await lancarMovimento({
-      tipo: "venda",
-      valor: Number(formVendaBalcao.valor),
-      forma_pagamento: formVendaBalcao.formaPagamento,
-      descricao: formVendaBalcao.descricao.trim() || null,
-    });
-    if (mov) {
-      setFormVendaBalcao({ valor: "", formaPagamento: "Dinheiro", descricao: "" });
-      showToast("Venda lançada");
-    }
-  };
-
   // Suprimento = dinheiro colocado no caixa. (A opção "Sangria" saiu da interface; lançamentos antigos continuam no banco.)
   const lancarMovimentoExtra = async () => {
     if (!formMovimento.valor) return;
@@ -872,7 +1101,7 @@ export default function AdminApp() {
 
   // ---------- compras (produto, quantidade, unidade, valor, data, observação e foto da nota) ----------
   const compraVazia = () => ({
-    itens: [{ produto: "", quantidade: "", unidade: "un" }],
+    itens: [{ produto: "", quantidade: "", unidade: "un", valor: "" }],
     valor: "",
     dataCompra: dataLocalISO(),
     observacao: "",
@@ -881,7 +1110,10 @@ export default function AdminApp() {
   const [notaArquivo, setNotaArquivo] = useState(null);
   const [notaPreviewUrl, setNotaPreviewUrl] = useState(null);
   const [salvandoCompra, setSalvandoCompra] = useState(false);
-  const notaInputRef = useRef(null);
+  const notaInputRef = useRef(null); // galeria
+  const notaCameraRef = useRef(null); // câmera
+  const [lendoCupom, setLendoCupom] = useState(false);
+  const [avisoCupom, setAvisoCupom] = useState(null); // { avisos: [] } depois de preencher o formulário pela leitura do cupom
 
   // libera a pré-visualização da foto quando ela muda ou a tela fecha
   useEffect(() => {
@@ -893,26 +1125,88 @@ export default function AdminApp() {
   const atualizarItemCompra = (i, campo, valor) =>
     setFormCompra((f) => ({ ...f, itens: f.itens.map((it, idx) => (idx === i ? { ...it, [campo]: valor } : it)) }));
   const adicionarItemCompra = () =>
-    setFormCompra((f) => ({ ...f, itens: [...f.itens, { produto: "", quantidade: "", unidade: "un" }] }));
+    setFormCompra((f) => ({ ...f, itens: [...f.itens, { produto: "", quantidade: "", unidade: "un", valor: "" }] }));
   const removerItemCompra = (i) =>
     setFormCompra((f) => (f.itens.length > 1 ? { ...f, itens: f.itens.filter((_, idx) => idx !== i) } : f));
 
-  const escolherNota = (e) => {
-    const file = e.target.files && e.target.files[0];
+  const escolherNota = async (e) => {
+    const input = e.target;
+    const file = input.files && input.files[0];
     if (!file) return;
     if (file.type && !file.type.startsWith("image/")) {
-      showToast("Escolha uma foto (imagem) da nota");
-      e.target.value = "";
+      showToast("Escolha uma foto (imagem) do cupom fiscal");
+      input.value = "";
       return;
     }
-    setNotaArquivo(file);
-    setNotaPreviewUrl(URL.createObjectURL(file));
+    let final = file;
+    try {
+      final = await reduzirFoto(file);
+    } catch (err) {
+      console.warn("Não deu para reduzir a foto; enviando a original.", err);
+    }
+    setNotaArquivo(final);
+    try {
+      setNotaPreviewUrl(URL.createObjectURL(final));
+    } catch (err) {
+      setNotaPreviewUrl(null);
+    }
+    showToast("Foto do cupom fiscal anexada");
+    input.value = "";
   };
 
   const removerNotaSelecionada = () => {
     setNotaArquivo(null);
     setNotaPreviewUrl(null);
     if (notaInputRef.current) notaInputRef.current.value = "";
+    if (notaCameraRef.current) notaCameraRef.current.value = "";
+  };
+
+  // lê o cupom fiscal (função "ler-cupom" no Supabase) e PREENCHE o formulário; nada é lançado
+  // sem você conferir e tocar em "Lançar compra"
+  const lerCupom = async () => {
+    if (!notaArquivo || lendoCupom) return;
+    setLendoCupom(true);
+    setAvisoCupom(null);
+    try {
+      const imagens = await prepararImagensCupom(notaArquivo);
+      const { data, error } = await supabase.functions.invoke("ler-cupom", { body: { imagens } });
+      if (error) {
+        let msg = "";
+        try { msg = (await error.context.json())?.erro || ""; } catch (e) { /* sem corpo */ }
+        throw new Error(msg || error.message || "falha na leitura");
+      }
+      if (!data || !Array.isArray(data.itens) || data.itens.length === 0) {
+        showToast("Não consegui ler itens nesse cupom. Tente outra foto, com mais luz, ou preencha na mão.");
+        return;
+      }
+      const itensLidos = data.itens.map((it) => ({
+        produto: String(it.produto || "").trim(),
+        quantidade: Number(it.quantidade) > 0 ? String(it.quantidade) : "",
+        unidade: it.unidade === "kg" ? "kg" : "un",
+        valor: Number(it.valor_total) > 0 ? String(it.valor_total) : "",
+      }));
+      const soma = itensLidos.reduce((t, it) => t + (Number(it.valor) || 0), 0);
+      const totalCupom = Number(data.total_cupom) > 0 ? Number(data.total_cupom) : soma;
+      const avisos = [];
+      if (data.legivel === false) avisos.push("A foto parece ilegível: confira tudo com cuidado.");
+      if (data.observacao) avisos.push(data.observacao);
+      if (Number(data.total_cupom) > 0 && soma > 0 && Math.abs(Number(data.total_cupom) - soma) > 0.05) {
+        avisos.push(`A soma dos itens (${fmt(soma)}) é diferente do total do cupom (${fmt(Number(data.total_cupom))}). Pode ter ficado item de fora.`);
+      }
+      setFormCompra((f) => ({
+        ...f,
+        itens: itensLidos,
+        valor: totalCupom > 0 ? String(Math.round(totalCupom * 100) / 100) : f.valor,
+        dataCompra: /^\d{4}-\d{2}-\d{2}$/.test(data.data_compra || "") ? data.data_compra : f.dataCompra,
+      }));
+      setAvisoCupom({ avisos });
+      showToast("Cupom lido! Confira os dados antes de lançar.");
+    } catch (err) {
+      console.error(err);
+      showToast(`Não foi possível ler o cupom: ${err.message}`);
+    } finally {
+      setLendoCupom(false);
+    }
   };
 
   const lancarCompra = async () => {
@@ -924,10 +1218,13 @@ export default function AdminApp() {
     for (const it of linhas) {
       const quantidade = Number(it.quantidade);
       if (!it.produto.trim() || !(quantidade > 0)) { showToast("Preencha o produto e a quantidade de cada item"); return; }
-      itens.push({ produto: it.produto.trim(), quantidade, unidade: it.unidade });
+      const valorItem = Number(it.valor);
+      itens.push({ produto: it.produto.trim(), quantidade, unidade: it.unidade, ...(valorItem > 0 && linhas.length > 1 ? { valor: valorItem } : {}) });
     }
-    const valor = Number(formCompra.valor);
-    if (!(valor > 0)) { showToast("Informe o valor da compra"); return; }
+    // total: o que foi digitado; se ficou vazio e todos os itens têm valor, soma os itens
+    const somaItens = itens.length > 1 && itens.every((it) => it.valor > 0) ? itens.reduce((t, it) => t + it.valor, 0) : 0;
+    const valor = Number(formCompra.valor) > 0 ? Number(formCompra.valor) : somaItens;
+    if (!(valor > 0)) { showToast("Informe o valor total da compra"); return; }
     if (!formCompra.dataCompra) { showToast("Informe a data da compra"); return; }
 
     setSalvandoCompra(true);
@@ -938,7 +1235,7 @@ export default function AdminApp() {
         const ext = ((notaArquivo.name || "").split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
         const caminho = `${caixaAtual.id}/${uid()}${uid()}.${ext}`;
         const { error: upErr } = await supabase.storage.from(NOTAS_BUCKET).upload(caminho, notaArquivo, { contentType: notaArquivo.type || undefined, upsert: false });
-        if (upErr) { showToast(`Erro ao enviar a foto da nota: ${upErr.message}`); return; }
+        if (upErr) { showToast(`Erro ao enviar a foto do cupom fiscal: ${upErr.message}`); return; }
         notaPath = caminho;
       }
 
@@ -961,6 +1258,7 @@ export default function AdminApp() {
       setComprasRecentes((prev) => [mov, ...prev].slice(0, 30));
       setHistoricoCompras((prev) => [mov, ...prev]);
       setFormCompra(compraVazia());
+      setAvisoCupom(null);
       removerNotaSelecionada();
       showToast("Compra lançada");
     } finally {
@@ -973,7 +1271,7 @@ export default function AdminApp() {
     setNotaVisualizacao({ carregando: true, url: null, erro: null });
     const { data, error } = await supabase.storage.from(NOTAS_BUCKET).createSignedUrl(path, 600);
     if (error || !data?.signedUrl) {
-      setNotaVisualizacao({ carregando: false, url: null, erro: "Não foi possível abrir a foto da nota." });
+      setNotaVisualizacao({ carregando: false, url: null, erro: "Não foi possível abrir a foto do cupom fiscal." });
       return;
     }
     setNotaVisualizacao({ carregando: false, url: data.signedUrl, erro: null });
@@ -1280,6 +1578,14 @@ export default function AdminApp() {
     const podeCancelar = ["aceito", "preparando", "pronto"].includes(p.status);
     const rotuloPronto = p.tipoEntrega === "entrega" ? "Saiu para entrega" : "Pronto para retirada";
     const trocoVisivel = p.formaPagamento === "Dinheiro" && p.precisaTroco && p.trocoPara != null;
+    // WhatsApp do cliente com a mensagem pronta: só abre quando você toca no botão verde
+    // ("Enviar confirmação no WhatsApp" etc.), nunca sozinho ao aceitar ou ao marcar pronto
+    const tempoEntregaTexto = mostrarTempoEntrega && Number(tempoEntregaMin) > 0
+      ? (tempoEntregaMin === tempoEntregaMax ? `${tempoEntregaMin} min` : `${tempoEntregaMin} a ${tempoEntregaMax} min`)
+      : null;
+    const tipoAvisoPronto = p.tipoEntrega === "entrega" ? "saiu" : "retirada";
+    const abrirWhatsApp = (tipo) => window.open(linkWhatsAppCliente(p, tipo, tempoEntregaTexto), "_blank", "noopener");
+    const avisoAtual = ["aceito", "preparando"].includes(p.status) ? "confirmado" : p.status === "pronto" ? tipoAvisoPronto : null;
     return (
       <Card key={p.id} style={p.status === "pendente" ? { borderColor: C.orange, borderWidth: 1.5 } : {}}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -1377,6 +1683,14 @@ export default function AdminApp() {
             <Printer size={15} />
           </button>
         </div>
+        {avisoAtual && (
+          <button
+            onClick={() => abrirWhatsApp(avisoAtual)}
+            style={{ ...btnOutline, width: "100%", marginTop: 8, borderColor: "rgba(37,211,102,0.5)", color: "#25D366" }}
+          >
+            <Phone size={15} /> {avisoAtual === "confirmado" ? "Enviar confirmação no WhatsApp" : avisoAtual === "saiu" ? "Avisar que saiu para entrega" : "Avisar que está pronto"}
+          </button>
+        )}
         {podeCancelar && (
           <button onClick={() => abrirCancelamento(p)} style={{ ...btnOutline, width: "100%", marginTop: 8, borderColor: C.red, color: C.red }}>
             <Ban size={15} /> Cancelar pedido
@@ -1393,6 +1707,9 @@ export default function AdminApp() {
         ? m.itens.map((it, i) => (
             <div key={i} style={{ fontSize: 11.5, color: C.textSoft }}>
               {fmtQtd(it.quantidade ?? it.qtd ?? 0)} {rotuloUnidade(it.unidade)} · {it.produto || it.nome}
+              {precoPorUnidade(m, it, m.itens.length) != null && (
+                <b style={{ color: C.orangeText }}> · {fmt(precoPorUnidade(m, it, m.itens.length))}/{rotuloUnidade(it.unidade)}</b>
+              )}
             </div>
           ))
         : m.descricao && <div style={{ fontSize: 11.5, color: C.textSoft }}>{m.descricao}</div>}
@@ -1403,7 +1720,7 @@ export default function AdminApp() {
           onClick={() => abrirNota(m.notaFotoPath)}
           style={{ marginTop: 6, background: C.orangeSoft, color: C.orangeText, border: "none", borderRadius: 8, padding: "5px 9px", fontSize: 11.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}
         >
-          <Camera size={12} /> Ver nota fiscal
+          <Camera size={12} /> Ver cupom fiscal
         </button>
       )}
     </>
@@ -1688,42 +2005,6 @@ export default function AdminApp() {
                 </Card>
 
                 <Card style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Nova venda (balcão)</div>
-                  <input
-                    type="number"
-                    placeholder="Valor (R$)"
-                    value={formVendaBalcao.valor}
-                    onChange={(e) => setFormVendaBalcao((f) => ({ ...f, valor: e.target.value }))}
-                    style={{ ...inputStyle, fontSize: 18, fontWeight: 700, padding: "12px", marginBottom: 8 }}
-                  />
-                  <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-                    {["Dinheiro", "Pix", "Cartão Crédito", "Cartão Débito"].map((fp) => (
-                      <button
-                        key={fp}
-                        onClick={() => setFormVendaBalcao((f) => ({ ...f, formaPagamento: fp }))}
-                        style={{
-                          padding: "7px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600,
-                          border: `1px solid ${formVendaBalcao.formaPagamento === fp ? C.orange : C.border}`,
-                          background: formVendaBalcao.formaPagamento === fp ? C.orangeSoft : "transparent",
-                          color: formVendaBalcao.formaPagamento === fp ? C.orangeText : C.textSoft,
-                        }}
-                      >
-                        {fp}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    placeholder="Descrição (opcional)"
-                    value={formVendaBalcao.descricao}
-                    onChange={(e) => setFormVendaBalcao((f) => ({ ...f, descricao: e.target.value }))}
-                    style={{ ...inputStyle, marginBottom: 10 }}
-                  />
-                  <button onClick={lancarVendaBalcao} style={{ ...btnPrimary, width: "100%" }}>
-                    <Check size={15} /> Lançar venda
-                  </button>
-                </Card>
-
-                <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Suprimento (adicionar dinheiro ao caixa)</div>
                   <input
                     type="number"
@@ -1855,7 +2136,7 @@ export default function AdminApp() {
                               <div style={{ fontSize: 11.5, color: C.textSoft }}>
                                 {r.qtd > 0 ? `${fmtQtd(r.qtd)} ${rotuloUnidade(r.unidade)} · ` : ""}Comprado em {fmtDataSimples(r.data)}
                               </div>
-                              {r.varios && <div style={{ fontSize: 11, color: C.textFaint }}>Compra com vários itens: o valor é o total da compra.</div>}
+                              {r.varios && r.precoUnit == null && <div style={{ fontSize: 11, color: C.textFaint }}>Compra com vários itens: o valor é o total da compra.</div>}
                             </div>
                             <div style={{ textAlign: "right", flexShrink: 0 }}>
                               <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: C.orangeText }}>
@@ -1881,6 +2162,46 @@ export default function AdminApp() {
             {caixaAtual && (
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Compras</div>
+
+                  <FieldLabel>Foto do cupom fiscal (opcional)</FieldLabel>
+                  <input ref={notaCameraRef} type="file" accept="image/*" capture="environment" onChange={escolherNota} style={{ display: "none" }} />
+                  <input ref={notaInputRef} type="file" accept="image/*" onChange={escolherNota} style={{ display: "none" }} />
+                  {notaArquivo ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.cardAlt, borderRadius: 10, padding: 8, marginBottom: 12 }}>
+                      {notaPreviewUrl
+                        ? <img src={notaPreviewUrl} alt="Pré-visualização do cupom fiscal" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+                        : <div style={{ width: 56, height: 56, borderRadius: 8, background: C.border, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ImageIcon size={20} color={C.textFaint} /></div>}
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: C.textSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {notaArquivo?.name || "Foto do cupom fiscal anexada"}
+                      </div>
+                      <button onClick={removerNotaSelecionada} style={iconBtnStyle} aria-label="Remover foto do cupom fiscal"><X size={16} color={C.textFaint} /></button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <button type="button" onClick={() => notaCameraRef.current && notaCameraRef.current.click()} style={{ ...btnOutline, flex: 1 }}>
+                        <Camera size={15} /> Tirar foto
+                      </button>
+                      <button type="button" onClick={() => notaInputRef.current && notaInputRef.current.click()} style={{ ...btnOutline, flex: 1 }}>
+                        <ImageIcon size={15} /> Galeria
+                      </button>
+                    </div>
+                  )}
+                  {notaArquivo && (
+                    <button
+                      type="button"
+                      onClick={lerCupom}
+                      disabled={lendoCupom}
+                      style={{ ...btnPrimary, width: "100%", marginBottom: 12, opacity: lendoCupom ? 0.7 : 1 }}
+                    >
+                      {lendoCupom ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {lendoCupom ? "Lendo o cupom…" : "Ler cupom e preencher"}
+                    </button>
+                  )}
+                  {avisoCupom && (
+                    <div style={{ background: C.orangeSoft, border: `1px solid ${C.orange}`, borderRadius: 10, padding: "9px 11px", marginBottom: 12, fontSize: 12.5, color: C.orangeText }}>
+                      <b>Dados lidos do cupom: confira produto, quantidade e valores antes de lançar.</b>
+                      {avisoCupom.avisos.map((a, i) => <div key={i} style={{ marginTop: 4 }}>• {a}</div>)}
+                    </div>
+                  )}
 
                   {formCompra.itens.map((it, i) => (
                     <div key={i} style={{ background: C.cardAlt, borderRadius: 10, padding: 10, marginBottom: 8 }}>
@@ -1933,6 +2254,30 @@ export default function AdminApp() {
                           </div>
                         </div>
                       </div>
+                      {formCompra.itens.length > 1 && (
+                        <div style={{ marginTop: 8 }}>
+                          <FieldLabel>Valor deste produto (R$) — para saber o preço por {rotuloUnidade(it.unidade)}</FieldLabel>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="any"
+                            placeholder="0,00"
+                            value={it.valor}
+                            onChange={(e) => atualizarItemCompra(i, "valor", e.target.value)}
+                            style={inputStyle}
+                          />
+                        </div>
+                      )}
+                      {(() => {
+                        const q = Number(it.quantidade);
+                        const v = formCompra.itens.length === 1 ? Number(formCompra.valor) : Number(it.valor);
+                        return q > 0 && v > 0 ? (
+                          <div style={{ marginTop: 8, fontSize: 12.5, color: C.orangeText, fontWeight: 700 }}>
+                            Preço por {rotuloUnidade(it.unidade)}: {fmt(v / q)}
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   ))}
                   <button onClick={adicionarItemCompra} style={{ ...btnOutline, width: "100%", marginBottom: 12, padding: "9px 14px", fontSize: 13 }}>
@@ -1971,22 +2316,6 @@ export default function AdminApp() {
                     onChange={(e) => setFormCompra((f) => ({ ...f, observacao: e.target.value }))}
                     style={{ ...inputStyle, marginBottom: 10 }}
                   />
-
-                  <FieldLabel>Foto da nota fiscal (opcional)</FieldLabel>
-                  <input ref={notaInputRef} type="file" accept="image/*" onChange={escolherNota} style={{ display: "none" }} id="compra-nota-input" />
-                  {notaPreviewUrl ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.cardAlt, borderRadius: 10, padding: 8, marginBottom: 12 }}>
-                      <img src={notaPreviewUrl} alt="Pré-visualização da nota" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: C.textSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {notaArquivo?.name || "Foto da nota anexada"}
-                      </div>
-                      <button onClick={removerNotaSelecionada} style={iconBtnStyle} aria-label="Remover foto da nota"><X size={16} color={C.textFaint} /></button>
-                    </div>
-                  ) : (
-                    <label htmlFor="compra-nota-input" style={{ ...btnOutline, width: "100%", marginBottom: 12, cursor: "pointer" }}>
-                      <Camera size={15} /> Tirar foto ou escolher da galeria
-                    </label>
-                  )}
 
                   <button
                     onClick={lancarCompra}
@@ -2082,6 +2411,92 @@ export default function AdminApp() {
                     <button onClick={() => removerDiaria(d.id)} style={iconBtnStyle} aria-label="Excluir diária"><Trash2 size={14} color={C.textFaint} /></button>
                   </div>
                 </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab === "contatos" && (
+          <>
+            <Card style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Contatos de clientes</div>
+                  <div style={{ fontSize: 12, color: C.textSoft, marginTop: 2 }}>Quem preencheu nome e WhatsApp no site, com ou sem pedido.</div>
+                </div>
+                <button onClick={exportarContatos} style={{ ...btnPrimary, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}>
+                  <Download size={16} /> Excel
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <MiniStat label="Contatos" value={contatos.length} />
+                <MiniStat label="Fizeram pedido" value={contatos.filter((c) => c.fez_pedido).length} />
+                <MiniStat label="Sem pedido" value={contatos.filter((c) => !c.fez_pedido).length} />
+              </div>
+              <div style={{ position: "relative", marginBottom: 10 }}>
+                <Search size={15} color={C.textFaint} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+                <input placeholder="Buscar por nome ou telefone" value={buscaContato} onChange={(e) => setBuscaContato(e.target.value)} style={{ ...inputStyle, paddingLeft: 34 }} />
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  { id: "todos", label: "Todos" },
+                  { id: "com_pedido", label: "Fizeram pedido" },
+                  { id: "sem_pedido", label: "Não finalizaram pedido" },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setFiltroContato(f.id)}
+                    style={{
+                      fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 999,
+                      border: `1px solid ${filtroContato === f.id ? C.orange : C.border}`,
+                      background: filtroContato === f.id ? C.orangeSoft : "transparent",
+                      color: filtroContato === f.id ? C.orange : C.textSoft,
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 10, lineHeight: 1.45 }}>
+                O botão Excel baixa a lista do filtro escolhido.
+              </div>
+            </Card>
+
+            {erroContatos && <EmptyState text={erroContatos} />}
+            {carregandoContatos && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: C.textSoft }}><Loader2 size={20} className="spin" /></div>
+            )}
+            {!carregandoContatos && !erroContatos && contatosFiltrados.length === 0 && (
+              <EmptyState text={contatos.length === 0 ? "Nenhum contato ainda. Eles aparecem aqui quando alguém preenche nome e WhatsApp no site." : "Nenhum contato com esse filtro."} />
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {!carregandoContatos && contatosFiltrados.map((c) => (
+                <Card key={c.id} style={{ padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nome}</div>
+                      <div className="mono" style={{ fontSize: 12.5, color: C.textSoft, marginTop: 1 }}>{telefoneLegivel(c.telefone)}</div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: c.fez_pedido ? C.greenSoft : C.orangeSoft, color: c.fez_pedido ? C.green : C.orange }}>
+                          {c.fez_pedido ? `${c.total_pedidos} ${c.total_pedidos === 1 ? "pedido" : "pedidos"}` : "Não finalizou pedido"}
+                        </span>
+                        <span style={{ fontSize: 10.5, color: C.textFaint, padding: "2px 0" }}>{new Date(c.ultimo_contato).toLocaleDateString("pt-BR")}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <a
+                        href={`https://wa.me/55${c.telefone}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ ...iconBtnStyle, width: 34, height: 34, borderRadius: 10, background: "rgba(37,211,102,0.14)" }}
+                        aria-label={`Abrir conversa com ${c.nome} no WhatsApp`}
+                      >
+                        <Phone size={15} color="#25D366" />
+                      </a>
+                      <button onClick={() => removerContato(c)} style={iconBtnStyle} aria-label={`Apagar ${c.nome}`}><Trash2 size={14} color={C.textFaint} /></button>
+                    </div>
+                  </div>
+                </Card>
               ))}
             </div>
           </>
@@ -2523,6 +2938,7 @@ export default function AdminApp() {
             { id: "equipe", label: "Equipe", icon: Users },
             { id: "relatorios", label: "Relatórios", icon: BarChart3 },
             { id: "cardapio", label: "Cardápio", icon: UtensilsCrossed },
+            { id: "contatos", label: "Contatos", icon: Contact },
           ].map(({ id, label, icon: Icon, badge }) => {
             const ativo = tab === id;
             return (
@@ -2591,14 +3007,14 @@ export default function AdminApp() {
         >
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
             <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="display" style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Nota fiscal</div>
+              <div className="display" style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Cupom fiscal</div>
               <button onClick={() => setNotaVisualizacao(null)} style={{ ...iconBtnStyle, background: C.cardAlt, borderRadius: 10, width: 36, height: 36 }} aria-label="Fechar"><X size={18} color={C.text} /></button>
             </div>
             {notaVisualizacao.carregando && <Loader2 size={24} className="spin" color={C.textSoft} />}
             {notaVisualizacao.erro && <div style={{ color: C.red, fontSize: 13.5 }}>{notaVisualizacao.erro}</div>}
             {notaVisualizacao.url && (
               <>
-                <img src={notaVisualizacao.url} alt="Foto da nota fiscal" style={{ maxWidth: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 12, background: C.card }} />
+                <img src={notaVisualizacao.url} alt="Foto do cupom fiscal" style={{ maxWidth: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 12, background: C.card }} />
                 <a href={notaVisualizacao.url} target="_blank" rel="noopener noreferrer" style={{ color: C.orangeText, fontSize: 13, fontWeight: 700 }}>
                   Abrir em nova aba
                 </a>
