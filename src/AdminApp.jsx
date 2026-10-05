@@ -30,6 +30,84 @@ const fmtDataSimples = (yyyyMMdd) => (yyyyMMdd ? new Date(`${yyyyMMdd}T00:00`).t
 const fmtQtd = (n) => Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 const rotuloUnidade = (u) => (/^k/i.test(String(u || "")) ? "kg" : "un");
 
+// prepara a foto do cupom para leitura por IA: largura 1000px e, se a foto for comprida, divide em
+// partes de ~1150px de altura com pequena sobreposição (a IA reduz imagens grandes e o texto miúdo
+// do cupom perderia a leitura). Devolve de 1 a 8 imagens JPEG em base64 (sem o prefixo data:).
+const prepararImagensCupom = (file) =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const LARG = 1000, ALT = 1150, SOBRA = 120, MAX_PARTES = 8;
+        let escala = Math.min(1, LARG / img.naturalWidth);
+        const limiteAltura = ALT + (ALT - SOBRA) * (MAX_PARTES - 1);
+        if (img.naturalHeight * escala > limiteAltura) escala = limiteAltura / img.naturalHeight;
+        const w = Math.max(1, Math.round(img.naturalWidth * escala));
+        const h = Math.max(1, Math.round(img.naturalHeight * escala));
+        const inteira = document.createElement("canvas");
+        inteira.width = w;
+        inteira.height = h;
+        inteira.getContext("2d").drawImage(img, 0, 0, w, h);
+        const partes = [];
+        for (let y = 0; y < h; y += ALT - SOBRA) {
+          const altura = Math.min(ALT, h - y);
+          const c = document.createElement("canvas");
+          c.width = w;
+          c.height = altura;
+          c.getContext("2d").drawImage(inteira, 0, y, w, altura, 0, 0, w, altura);
+          partes.push(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+          if (y + altura >= h) break;
+        }
+        URL.revokeObjectURL(url);
+        resolve(partes);
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("foto ilegível")); };
+    img.src = url;
+  });
+
+// preço por kg (ou por unidade) de um item de compra. Usa o valor do próprio item quando foi informado;
+// numa compra com um só produto, usa o valor total da compra.
+const precoPorUnidade = (compra, it, totalItens) => {
+  const q = Number(it.quantidade ?? it.qtd ?? 0);
+  const v = it.valor != null && it.valor !== "" ? Number(it.valor) : totalItens === 1 ? Number(compra.valor) : null;
+  return v != null && q > 0 && v > 0 ? v / q : null;
+};
+
+// reduz a foto (lado maior 2600px, JPEG) antes de enviar: foto de câmera costuma ter vários MB.
+// O cupom fiscal é longo e estreito, por isso o limite é alto: com menos, o texto miúdo perde a leitura.
+const reduzirFoto = (file, maxLado = 2600, qualidade = 0.85) =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const escala = Math.min(1, maxLado / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * escala));
+        const h = Math.max(1, Math.round(img.naturalHeight * escala));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          if (!blob) { reject(new Error("não foi possível reduzir a foto")); return; }
+          const nome = ((file.name || "nota").replace(/\.[^.]+$/, "") || "nota") + ".jpg";
+          resolve(new File([blob], nome, { type: "image/jpeg" }));
+        }, "image/jpeg", qualidade);
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("foto ilegível")); };
+    img.src = url;
+  });
+
 // A tabela de pedidos identifica cada pedido por um UUID. Se existir uma coluna de número
 // sequencial, ela é usada; senão mostramos um código curto e estável tirado do UUID.
 const codigoPedido = (p) => (p.numero != null && p.numero !== "" ? String(p.numero) : String(p.id || "").replace(/-/g, "").slice(0, 4).toUpperCase());
@@ -763,7 +841,6 @@ export default function AdminApp() {
   const [carregandoCaixa, setCarregandoCaixa] = useState(true);
 
   const [valorAberturaForm, setValorAberturaForm] = useState("");
-  const [formVendaBalcao, setFormVendaBalcao] = useState({ valor: "", formaPagamento: "Dinheiro", descricao: "" });
   const [formMovimento, setFormMovimento] = useState({ tipo: "suprimento", valor: "", descricao: "" });
   const [comprasRecentes, setComprasRecentes] = useState([]); // últimas compras de todos os turnos (para rever a nota depois)
   const [historicoCompras, setHistoricoCompras] = useState([]); // todas as compras (para a busca de preço por produto)
@@ -912,7 +989,7 @@ export default function AdminApp() {
           qtd,
           unidade: it.unidade,
           total: m.valor,
-          precoUnit: unico && qtd > 0 ? m.valor / qtd : null,
+          precoUnit: precoPorUnidade(m, it, itens.length),
           data: m.dataCompra || (m.createdAt ? String(m.createdAt).slice(0, 10) : ""),
           varios: !unico,
           compra: m,
@@ -1008,20 +1085,6 @@ export default function AdminApp() {
 
   const totalDiarias = useMemo(() => diarias.reduce((s, d) => s + d.valor, 0), [diarias]);
 
-  const lancarVendaBalcao = async () => {
-    if (!formVendaBalcao.valor) return;
-    const mov = await lancarMovimento({
-      tipo: "venda",
-      valor: Number(formVendaBalcao.valor),
-      forma_pagamento: formVendaBalcao.formaPagamento,
-      descricao: formVendaBalcao.descricao.trim() || null,
-    });
-    if (mov) {
-      setFormVendaBalcao({ valor: "", formaPagamento: "Dinheiro", descricao: "" });
-      showToast("Venda lançada");
-    }
-  };
-
   // Suprimento = dinheiro colocado no caixa. (A opção "Sangria" saiu da interface; lançamentos antigos continuam no banco.)
   const lancarMovimentoExtra = async () => {
     if (!formMovimento.valor) return;
@@ -1038,7 +1101,7 @@ export default function AdminApp() {
 
   // ---------- compras (produto, quantidade, unidade, valor, data, observação e foto da nota) ----------
   const compraVazia = () => ({
-    itens: [{ produto: "", quantidade: "", unidade: "un" }],
+    itens: [{ produto: "", quantidade: "", unidade: "un", valor: "" }],
     valor: "",
     dataCompra: dataLocalISO(),
     observacao: "",
@@ -1047,7 +1110,10 @@ export default function AdminApp() {
   const [notaArquivo, setNotaArquivo] = useState(null);
   const [notaPreviewUrl, setNotaPreviewUrl] = useState(null);
   const [salvandoCompra, setSalvandoCompra] = useState(false);
-  const notaInputRef = useRef(null);
+  const notaInputRef = useRef(null); // galeria
+  const notaCameraRef = useRef(null); // câmera
+  const [lendoCupom, setLendoCupom] = useState(false);
+  const [avisoCupom, setAvisoCupom] = useState(null); // { avisos: [] } depois de preencher o formulário pela leitura do cupom
 
   // libera a pré-visualização da foto quando ela muda ou a tela fecha
   useEffect(() => {
@@ -1059,26 +1125,88 @@ export default function AdminApp() {
   const atualizarItemCompra = (i, campo, valor) =>
     setFormCompra((f) => ({ ...f, itens: f.itens.map((it, idx) => (idx === i ? { ...it, [campo]: valor } : it)) }));
   const adicionarItemCompra = () =>
-    setFormCompra((f) => ({ ...f, itens: [...f.itens, { produto: "", quantidade: "", unidade: "un" }] }));
+    setFormCompra((f) => ({ ...f, itens: [...f.itens, { produto: "", quantidade: "", unidade: "un", valor: "" }] }));
   const removerItemCompra = (i) =>
     setFormCompra((f) => (f.itens.length > 1 ? { ...f, itens: f.itens.filter((_, idx) => idx !== i) } : f));
 
-  const escolherNota = (e) => {
-    const file = e.target.files && e.target.files[0];
+  const escolherNota = async (e) => {
+    const input = e.target;
+    const file = input.files && input.files[0];
     if (!file) return;
     if (file.type && !file.type.startsWith("image/")) {
-      showToast("Escolha uma foto (imagem) da nota");
-      e.target.value = "";
+      showToast("Escolha uma foto (imagem) do cupom fiscal");
+      input.value = "";
       return;
     }
-    setNotaArquivo(file);
-    setNotaPreviewUrl(URL.createObjectURL(file));
+    let final = file;
+    try {
+      final = await reduzirFoto(file);
+    } catch (err) {
+      console.warn("Não deu para reduzir a foto; enviando a original.", err);
+    }
+    setNotaArquivo(final);
+    try {
+      setNotaPreviewUrl(URL.createObjectURL(final));
+    } catch (err) {
+      setNotaPreviewUrl(null);
+    }
+    showToast("Foto do cupom fiscal anexada");
+    input.value = "";
   };
 
   const removerNotaSelecionada = () => {
     setNotaArquivo(null);
     setNotaPreviewUrl(null);
     if (notaInputRef.current) notaInputRef.current.value = "";
+    if (notaCameraRef.current) notaCameraRef.current.value = "";
+  };
+
+  // lê o cupom fiscal (função "ler-cupom" no Supabase) e PREENCHE o formulário; nada é lançado
+  // sem você conferir e tocar em "Lançar compra"
+  const lerCupom = async () => {
+    if (!notaArquivo || lendoCupom) return;
+    setLendoCupom(true);
+    setAvisoCupom(null);
+    try {
+      const imagens = await prepararImagensCupom(notaArquivo);
+      const { data, error } = await supabase.functions.invoke("ler-cupom", { body: { imagens } });
+      if (error) {
+        let msg = "";
+        try { msg = (await error.context.json())?.erro || ""; } catch (e) { /* sem corpo */ }
+        throw new Error(msg || error.message || "falha na leitura");
+      }
+      if (!data || !Array.isArray(data.itens) || data.itens.length === 0) {
+        showToast("Não consegui ler itens nesse cupom. Tente outra foto, com mais luz, ou preencha na mão.");
+        return;
+      }
+      const itensLidos = data.itens.map((it) => ({
+        produto: String(it.produto || "").trim(),
+        quantidade: Number(it.quantidade) > 0 ? String(it.quantidade) : "",
+        unidade: it.unidade === "kg" ? "kg" : "un",
+        valor: Number(it.valor_total) > 0 ? String(it.valor_total) : "",
+      }));
+      const soma = itensLidos.reduce((t, it) => t + (Number(it.valor) || 0), 0);
+      const totalCupom = Number(data.total_cupom) > 0 ? Number(data.total_cupom) : soma;
+      const avisos = [];
+      if (data.legivel === false) avisos.push("A foto parece ilegível: confira tudo com cuidado.");
+      if (data.observacao) avisos.push(data.observacao);
+      if (Number(data.total_cupom) > 0 && soma > 0 && Math.abs(Number(data.total_cupom) - soma) > 0.05) {
+        avisos.push(`A soma dos itens (${fmt(soma)}) é diferente do total do cupom (${fmt(Number(data.total_cupom))}). Pode ter ficado item de fora.`);
+      }
+      setFormCompra((f) => ({
+        ...f,
+        itens: itensLidos,
+        valor: totalCupom > 0 ? String(Math.round(totalCupom * 100) / 100) : f.valor,
+        dataCompra: /^\d{4}-\d{2}-\d{2}$/.test(data.data_compra || "") ? data.data_compra : f.dataCompra,
+      }));
+      setAvisoCupom({ avisos });
+      showToast("Cupom lido! Confira os dados antes de lançar.");
+    } catch (err) {
+      console.error(err);
+      showToast(`Não foi possível ler o cupom: ${err.message}`);
+    } finally {
+      setLendoCupom(false);
+    }
   };
 
   const lancarCompra = async () => {
@@ -1090,10 +1218,13 @@ export default function AdminApp() {
     for (const it of linhas) {
       const quantidade = Number(it.quantidade);
       if (!it.produto.trim() || !(quantidade > 0)) { showToast("Preencha o produto e a quantidade de cada item"); return; }
-      itens.push({ produto: it.produto.trim(), quantidade, unidade: it.unidade });
+      const valorItem = Number(it.valor);
+      itens.push({ produto: it.produto.trim(), quantidade, unidade: it.unidade, ...(valorItem > 0 && linhas.length > 1 ? { valor: valorItem } : {}) });
     }
-    const valor = Number(formCompra.valor);
-    if (!(valor > 0)) { showToast("Informe o valor da compra"); return; }
+    // total: o que foi digitado; se ficou vazio e todos os itens têm valor, soma os itens
+    const somaItens = itens.length > 1 && itens.every((it) => it.valor > 0) ? itens.reduce((t, it) => t + it.valor, 0) : 0;
+    const valor = Number(formCompra.valor) > 0 ? Number(formCompra.valor) : somaItens;
+    if (!(valor > 0)) { showToast("Informe o valor total da compra"); return; }
     if (!formCompra.dataCompra) { showToast("Informe a data da compra"); return; }
 
     setSalvandoCompra(true);
@@ -1104,7 +1235,7 @@ export default function AdminApp() {
         const ext = ((notaArquivo.name || "").split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
         const caminho = `${caixaAtual.id}/${uid()}${uid()}.${ext}`;
         const { error: upErr } = await supabase.storage.from(NOTAS_BUCKET).upload(caminho, notaArquivo, { contentType: notaArquivo.type || undefined, upsert: false });
-        if (upErr) { showToast(`Erro ao enviar a foto da nota: ${upErr.message}`); return; }
+        if (upErr) { showToast(`Erro ao enviar a foto do cupom fiscal: ${upErr.message}`); return; }
         notaPath = caminho;
       }
 
@@ -1127,6 +1258,7 @@ export default function AdminApp() {
       setComprasRecentes((prev) => [mov, ...prev].slice(0, 30));
       setHistoricoCompras((prev) => [mov, ...prev]);
       setFormCompra(compraVazia());
+      setAvisoCupom(null);
       removerNotaSelecionada();
       showToast("Compra lançada");
     } finally {
@@ -1139,7 +1271,7 @@ export default function AdminApp() {
     setNotaVisualizacao({ carregando: true, url: null, erro: null });
     const { data, error } = await supabase.storage.from(NOTAS_BUCKET).createSignedUrl(path, 600);
     if (error || !data?.signedUrl) {
-      setNotaVisualizacao({ carregando: false, url: null, erro: "Não foi possível abrir a foto da nota." });
+      setNotaVisualizacao({ carregando: false, url: null, erro: "Não foi possível abrir a foto do cupom fiscal." });
       return;
     }
     setNotaVisualizacao({ carregando: false, url: data.signedUrl, erro: null });
@@ -1446,8 +1578,8 @@ export default function AdminApp() {
     const podeCancelar = ["aceito", "preparando", "pronto"].includes(p.status);
     const rotuloPronto = p.tipoEntrega === "entrega" ? "Saiu para entrega" : "Pronto para retirada";
     const trocoVisivel = p.formaPagamento === "Dinheiro" && p.precisaTroco && p.trocoPara != null;
-    // WhatsApp do cliente com a mensagem pronta: abre junto com o clique (precisa ser no mesmo
-    // toque, senão o navegador bloqueia a nova aba); a pessoa só aperta enviar
+    // WhatsApp do cliente com a mensagem pronta: só abre quando você toca no botão verde
+    // ("Enviar confirmação no WhatsApp" etc.), nunca sozinho ao aceitar ou ao marcar pronto
     const tempoEntregaTexto = mostrarTempoEntrega && Number(tempoEntregaMin) > 0
       ? (tempoEntregaMin === tempoEntregaMax ? `${tempoEntregaMin} min` : `${tempoEntregaMin} a ${tempoEntregaMax} min`)
       : null;
@@ -1529,14 +1661,14 @@ export default function AdminApp() {
           {p.status === "pendente" && (
             <>
               <button onClick={() => recusarPedido(p.id)} style={{ ...btnOutline, flex: 1 }}>Recusar</button>
-              <button onClick={() => { abrirWhatsApp("confirmado"); aceitarPedido(p.id); }} style={{ ...btnPrimary, flex: 1 }}><Check size={15} /> Aceitar</button>
+              <button onClick={() => aceitarPedido(p.id)} style={{ ...btnPrimary, flex: 1 }}><Check size={15} /> Aceitar</button>
             </>
           )}
           {p.status === "aceito" && (
             <button onClick={() => iniciarPreparoPedido(p.id)} style={{ ...btnPrimary, flex: 1 }}><Check size={15} /> Iniciar preparo</button>
           )}
           {p.status === "preparando" && (
-            <button onClick={() => { abrirWhatsApp(tipoAvisoPronto); marcarProntoPedido(p); }} style={{ ...btnPrimary, flex: 1 }}>
+            <button onClick={() => marcarProntoPedido(p)} style={{ ...btnPrimary, flex: 1 }}>
               <Check size={15} /> {p.tipoEntrega === "entrega" ? "Saiu para entrega" : "Pronto para retirada"}
             </button>
           )}
@@ -1575,6 +1707,9 @@ export default function AdminApp() {
         ? m.itens.map((it, i) => (
             <div key={i} style={{ fontSize: 11.5, color: C.textSoft }}>
               {fmtQtd(it.quantidade ?? it.qtd ?? 0)} {rotuloUnidade(it.unidade)} · {it.produto || it.nome}
+              {precoPorUnidade(m, it, m.itens.length) != null && (
+                <b style={{ color: C.orangeText }}> · {fmt(precoPorUnidade(m, it, m.itens.length))}/{rotuloUnidade(it.unidade)}</b>
+              )}
             </div>
           ))
         : m.descricao && <div style={{ fontSize: 11.5, color: C.textSoft }}>{m.descricao}</div>}
@@ -1585,7 +1720,7 @@ export default function AdminApp() {
           onClick={() => abrirNota(m.notaFotoPath)}
           style={{ marginTop: 6, background: C.orangeSoft, color: C.orangeText, border: "none", borderRadius: 8, padding: "5px 9px", fontSize: 11.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}
         >
-          <Camera size={12} /> Ver nota fiscal
+          <Camera size={12} /> Ver cupom fiscal
         </button>
       )}
     </>
@@ -1870,42 +2005,6 @@ export default function AdminApp() {
                 </Card>
 
                 <Card style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Nova venda (balcão)</div>
-                  <input
-                    type="number"
-                    placeholder="Valor (R$)"
-                    value={formVendaBalcao.valor}
-                    onChange={(e) => setFormVendaBalcao((f) => ({ ...f, valor: e.target.value }))}
-                    style={{ ...inputStyle, fontSize: 18, fontWeight: 700, padding: "12px", marginBottom: 8 }}
-                  />
-                  <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-                    {["Dinheiro", "Pix", "Cartão Crédito", "Cartão Débito"].map((fp) => (
-                      <button
-                        key={fp}
-                        onClick={() => setFormVendaBalcao((f) => ({ ...f, formaPagamento: fp }))}
-                        style={{
-                          padding: "7px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600,
-                          border: `1px solid ${formVendaBalcao.formaPagamento === fp ? C.orange : C.border}`,
-                          background: formVendaBalcao.formaPagamento === fp ? C.orangeSoft : "transparent",
-                          color: formVendaBalcao.formaPagamento === fp ? C.orangeText : C.textSoft,
-                        }}
-                      >
-                        {fp}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    placeholder="Descrição (opcional)"
-                    value={formVendaBalcao.descricao}
-                    onChange={(e) => setFormVendaBalcao((f) => ({ ...f, descricao: e.target.value }))}
-                    style={{ ...inputStyle, marginBottom: 10 }}
-                  />
-                  <button onClick={lancarVendaBalcao} style={{ ...btnPrimary, width: "100%" }}>
-                    <Check size={15} /> Lançar venda
-                  </button>
-                </Card>
-
-                <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Suprimento (adicionar dinheiro ao caixa)</div>
                   <input
                     type="number"
@@ -2037,7 +2136,7 @@ export default function AdminApp() {
                               <div style={{ fontSize: 11.5, color: C.textSoft }}>
                                 {r.qtd > 0 ? `${fmtQtd(r.qtd)} ${rotuloUnidade(r.unidade)} · ` : ""}Comprado em {fmtDataSimples(r.data)}
                               </div>
-                              {r.varios && <div style={{ fontSize: 11, color: C.textFaint }}>Compra com vários itens: o valor é o total da compra.</div>}
+                              {r.varios && r.precoUnit == null && <div style={{ fontSize: 11, color: C.textFaint }}>Compra com vários itens: o valor é o total da compra.</div>}
                             </div>
                             <div style={{ textAlign: "right", flexShrink: 0 }}>
                               <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: C.orangeText }}>
@@ -2063,6 +2162,46 @@ export default function AdminApp() {
             {caixaAtual && (
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Compras</div>
+
+                  <FieldLabel>Foto do cupom fiscal (opcional)</FieldLabel>
+                  <input ref={notaCameraRef} type="file" accept="image/*" capture="environment" onChange={escolherNota} style={{ display: "none" }} />
+                  <input ref={notaInputRef} type="file" accept="image/*" onChange={escolherNota} style={{ display: "none" }} />
+                  {notaArquivo ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.cardAlt, borderRadius: 10, padding: 8, marginBottom: 12 }}>
+                      {notaPreviewUrl
+                        ? <img src={notaPreviewUrl} alt="Pré-visualização do cupom fiscal" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+                        : <div style={{ width: 56, height: 56, borderRadius: 8, background: C.border, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ImageIcon size={20} color={C.textFaint} /></div>}
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: C.textSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {notaArquivo?.name || "Foto do cupom fiscal anexada"}
+                      </div>
+                      <button onClick={removerNotaSelecionada} style={iconBtnStyle} aria-label="Remover foto do cupom fiscal"><X size={16} color={C.textFaint} /></button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <button type="button" onClick={() => notaCameraRef.current && notaCameraRef.current.click()} style={{ ...btnOutline, flex: 1 }}>
+                        <Camera size={15} /> Tirar foto
+                      </button>
+                      <button type="button" onClick={() => notaInputRef.current && notaInputRef.current.click()} style={{ ...btnOutline, flex: 1 }}>
+                        <ImageIcon size={15} /> Galeria
+                      </button>
+                    </div>
+                  )}
+                  {notaArquivo && (
+                    <button
+                      type="button"
+                      onClick={lerCupom}
+                      disabled={lendoCupom}
+                      style={{ ...btnPrimary, width: "100%", marginBottom: 12, opacity: lendoCupom ? 0.7 : 1 }}
+                    >
+                      {lendoCupom ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {lendoCupom ? "Lendo o cupom…" : "Ler cupom e preencher"}
+                    </button>
+                  )}
+                  {avisoCupom && (
+                    <div style={{ background: C.orangeSoft, border: `1px solid ${C.orange}`, borderRadius: 10, padding: "9px 11px", marginBottom: 12, fontSize: 12.5, color: C.orangeText }}>
+                      <b>Dados lidos do cupom: confira produto, quantidade e valores antes de lançar.</b>
+                      {avisoCupom.avisos.map((a, i) => <div key={i} style={{ marginTop: 4 }}>• {a}</div>)}
+                    </div>
+                  )}
 
                   {formCompra.itens.map((it, i) => (
                     <div key={i} style={{ background: C.cardAlt, borderRadius: 10, padding: 10, marginBottom: 8 }}>
@@ -2115,6 +2254,30 @@ export default function AdminApp() {
                           </div>
                         </div>
                       </div>
+                      {formCompra.itens.length > 1 && (
+                        <div style={{ marginTop: 8 }}>
+                          <FieldLabel>Valor deste produto (R$) — para saber o preço por {rotuloUnidade(it.unidade)}</FieldLabel>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="any"
+                            placeholder="0,00"
+                            value={it.valor}
+                            onChange={(e) => atualizarItemCompra(i, "valor", e.target.value)}
+                            style={inputStyle}
+                          />
+                        </div>
+                      )}
+                      {(() => {
+                        const q = Number(it.quantidade);
+                        const v = formCompra.itens.length === 1 ? Number(formCompra.valor) : Number(it.valor);
+                        return q > 0 && v > 0 ? (
+                          <div style={{ marginTop: 8, fontSize: 12.5, color: C.orangeText, fontWeight: 700 }}>
+                            Preço por {rotuloUnidade(it.unidade)}: {fmt(v / q)}
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   ))}
                   <button onClick={adicionarItemCompra} style={{ ...btnOutline, width: "100%", marginBottom: 12, padding: "9px 14px", fontSize: 13 }}>
@@ -2153,22 +2316,6 @@ export default function AdminApp() {
                     onChange={(e) => setFormCompra((f) => ({ ...f, observacao: e.target.value }))}
                     style={{ ...inputStyle, marginBottom: 10 }}
                   />
-
-                  <FieldLabel>Foto da nota fiscal (opcional)</FieldLabel>
-                  <input ref={notaInputRef} type="file" accept="image/*" onChange={escolherNota} style={{ display: "none" }} id="compra-nota-input" />
-                  {notaPreviewUrl ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.cardAlt, borderRadius: 10, padding: 8, marginBottom: 12 }}>
-                      <img src={notaPreviewUrl} alt="Pré-visualização da nota" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: C.textSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {notaArquivo?.name || "Foto da nota anexada"}
-                      </div>
-                      <button onClick={removerNotaSelecionada} style={iconBtnStyle} aria-label="Remover foto da nota"><X size={16} color={C.textFaint} /></button>
-                    </div>
-                  ) : (
-                    <label htmlFor="compra-nota-input" style={{ ...btnOutline, width: "100%", marginBottom: 12, cursor: "pointer" }}>
-                      <Camera size={15} /> Tirar foto ou escolher da galeria
-                    </label>
-                  )}
 
                   <button
                     onClick={lancarCompra}
@@ -2860,14 +3007,14 @@ export default function AdminApp() {
         >
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
             <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="display" style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Nota fiscal</div>
+              <div className="display" style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Cupom fiscal</div>
               <button onClick={() => setNotaVisualizacao(null)} style={{ ...iconBtnStyle, background: C.cardAlt, borderRadius: 10, width: 36, height: 36 }} aria-label="Fechar"><X size={18} color={C.text} /></button>
             </div>
             {notaVisualizacao.carregando && <Loader2 size={24} className="spin" color={C.textSoft} />}
             {notaVisualizacao.erro && <div style={{ color: C.red, fontSize: 13.5 }}>{notaVisualizacao.erro}</div>}
             {notaVisualizacao.url && (
               <>
-                <img src={notaVisualizacao.url} alt="Foto da nota fiscal" style={{ maxWidth: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 12, background: C.card }} />
+                <img src={notaVisualizacao.url} alt="Foto do cupom fiscal" style={{ maxWidth: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 12, background: C.card }} />
                 <a href={notaVisualizacao.url} target="_blank" rel="noopener noreferrer" style={{ color: C.orangeText, fontSize: 13, fontWeight: 700 }}>
                   Abrir em nova aba
                 </a>

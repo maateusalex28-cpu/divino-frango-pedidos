@@ -42,6 +42,13 @@ const imagemPadraoProduto = (nome) => {
 const fmt = (n) => (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+// data local do aparelho (AAAA-MM-DD). Não usar toISOString() para datas de pedido: ele devolve UTC
+// e, depois das 21h no Brasil, já viraria o dia seguinte.
+const dataLocalISO = (d = new Date()) => {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 // aplica máscara (DD) 9XXXX-XXXX / (DD) XXXX-XXXX enquanto o cliente digita
 const mascaraTelefone = (valor) => {
   const digitos = (valor || "").replace(/\D/g, "").slice(0, 11);
@@ -54,10 +61,10 @@ const mascaraTelefone = (valor) => {
   return `(${ddd}) ${resto.slice(0, 5)}-${resto.slice(5, 9)}`;
 };
 
-// telefone válido = DDD + 8 ou 9 dígitos (10 ou 11 dígitos no total) — bloqueia número incompleto
+// telefone válido = DDD + celular com 9 dígitos (11 dígitos no total, começando com 9 depois do DDD)
 const telefoneCompleto = (valor) => {
   const digitos = (valor || "").replace(/\D/g, "");
-  return digitos.length === 10 || digitos.length === 11;
+  return digitos.length === 11 && digitos[2] === "9";
 };
 
 
@@ -314,7 +321,7 @@ export default function PedidoApp() {
       d.setDate(d.getDate() + i);
       const cfg = horarios[d.getDay()];
       if (cfg && cfg.aberto) {
-        const iso = d.toISOString().slice(0, 10);
+        const iso = dataLocalISO(d);
         const label = i === 0 ? "Hoje" : i === 1 ? "Amanhã" : d.toLocaleDateString("pt-BR", { weekday: "long" });
         dias.push({ iso, label: `${label} (${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })})`, config: cfg });
       }
@@ -322,9 +329,7 @@ export default function PedidoApp() {
     return dias;
   }, [horarios]);
 
-  useEffect(() => {
-    if (!diaEscolhido && proximosDiasAbertos.length > 0) setDiaEscolhido(proximosDiasAbertos[0].iso);
-  }, [proximosDiasAbertos, diaEscolhido]);
+  // o dia do pedido (quando a loja está fechada) NÃO vem marcado: o cliente precisa escolher
 
   const configDiaEscolhido = useMemo(() => {
     if (!horarios || !diaEscolhido) return null;
@@ -414,7 +419,7 @@ export default function PedidoApp() {
         setCupomErro("Esse cupom não está mais ativo.");
         return;
       }
-      if (data.validade && data.validade < new Date().toISOString().slice(0, 10)) {
+      if (data.validade && data.validade < dataLocalISO()) {
         setCupomErro("Esse cupom expirou.");
         return;
       }
@@ -506,7 +511,11 @@ export default function PedidoApp() {
       return;
     }
     if (!telefoneCompleto(form.telefone)) {
-      setErro("Informe um telefone completo, com DDD, para continuar.");
+      setErro("Informe o WhatsApp completo, com DDD e o 9 na frente. Ex.: (47) 99999-9999.");
+      return;
+    }
+    if (!statusLoja.aberta && proximosDiasAbertos.length > 0 && !diaEscolhido) {
+      setErro("Escolha para qual dia você quer receber o pedido.");
       return;
     }
     if (form.tipoEntrega === "entrega" && (!form.rua.trim() || !form.numero.trim())) {
@@ -528,7 +537,7 @@ export default function PedidoApp() {
     setErro("");
     setEnviando(true);
     try {
-      const dataDoPedido = statusLoja.aberta ? new Date().toISOString().slice(0, 10) : diaEscolhido;
+      const dataDoPedido = statusLoja.aberta ? dataLocalISO() : diaEscolhido;
       // o id é gerado aqui: assim o site não precisa ler a tabela de pedidos depois de gravar
       // (a leitura da tabela é só do painel; o cliente consulta o próprio pedido por status_pedido)
       const idPedido = novoIdPedido();
@@ -626,7 +635,7 @@ export default function PedidoApp() {
     })();
   }, []);
 
-  // acompanha o status do pedido atual: consulta a cada 10s enquanto a tela está aberta
+  // acompanha o status do pedido atual: consulta a cada 3s enquanto a tela está aberta
   // (o tempo real do Supabase exige leitura da tabela inteira, que agora é só do painel)
   useEffect(() => {
     if (!pedidoAtual?.id || tela !== "acompanhar") return;
@@ -638,7 +647,7 @@ export default function PedidoApp() {
       if (ativo && atual) setPedidoAtual((p) => (p && p.id === id ? { ...p, status: atual.status } : p));
     };
     atualizar();
-    const t = setInterval(atualizar, 10000);
+    const t = setInterval(atualizar, 3000);
     document.addEventListener("visibilitychange", atualizar);
     return () => {
       ativo = false;
@@ -1205,19 +1214,6 @@ export default function PedidoApp() {
               <div className="campo-grupo">
                 <div className="campo-grupo-titulo"><Bike size={17} /> Como você quer receber?</div>
 
-                {!statusLoja.aberta && proximosDiasAbertos.length > 0 && (
-                  <>
-                    <span style={labelStyle}>Para qual dia é o pedido?</span>
-                    <div className="chips" style={{ marginBottom: 14 }}>
-                      {proximosDiasAbertos.map((d) => (
-                        <button key={d.iso} onClick={() => setDiaEscolhido(d.iso)} className={`chip${diaEscolhido === d.iso ? " is-active" : ""}`} style={{ textTransform: "capitalize" }}>
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-
                 <div className="segmento">
                   <button onClick={() => setForm((f) => ({ ...f, tipoEntrega: "retirada" }))} className={form.tipoEntrega === "retirada" ? "is-active" : ""}>
                     <Store size={17} /> Retirada
@@ -1226,10 +1222,23 @@ export default function PedidoApp() {
                     <Bike size={17} /> Entrega
                   </button>
                 </div>
-                {(configDiaEscolhido || horarios) && (
+                {!statusLoja.aberta && proximosDiasAbertos.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <span style={labelStyle}>Para qual dia é o pedido? <span className="obrig">*</span></span>
+                    <div className="chips" style={{ marginBottom: 8 }}>
+                      {proximosDiasAbertos.map((d) => (
+                        <button key={d.iso} onClick={() => setDiaEscolhido(d.iso)} className={`chip${diaEscolhido === d.iso ? " is-active" : ""}`} style={{ textTransform: "capitalize" }}>
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                    {!diaEscolhido && <div className="dica">Toque no dia em que você quer receber o pedido.</div>}
+                  </div>
+                )}
+                {(statusLoja.aberta ? horarios : configDiaEscolhido) && (
                   <div className="dica">
                     Nossa entrega começa às {(statusLoja.aberta ? horarios?.[new Date().getDay()]?.entregaAbre : configDiaEscolhido?.entregaAbre) || "11:00"}
-                    {!statusLoja.aberta ? " no dia escolhido acima." : " hoje."}
+                    {!statusLoja.aberta ? " no dia escolhido." : " hoje."}
                     {form.tipoEntrega === "entrega" && tempoEntregaVisivel ? ` ${textoTempoEntrega}.` : ""}
                   </div>
                 )}
@@ -1406,7 +1415,17 @@ export default function PedidoApp() {
                   <div className={`icone-redondo${pedidoAtual.status === "concluido" ? " is-ok" : ""}`}>
                     {pedidoAtual.status === "concluido" ? <Check size={26} strokeWidth={2.6} /> : <Flame size={26} />}
                   </div>
-                  <h2 className="acomp-titulo">{pedidoAtual.status === "concluido" ? "Pedido concluído. Bom apetite!" : "Recebemos seu pedido!"}</h2>
+                  <h2 className="acomp-titulo">
+                    {pedidoAtual.status === "concluido"
+                      ? "Pedido concluído. Bom apetite!"
+                      : pedidoAtual.status === "pronto"
+                        ? (pedidoAtual.tipoEntrega === "entrega" ? "Seu pedido saiu para entrega!" : "Seu pedido está pronto para retirada!")
+                        : pedidoAtual.status === "preparando"
+                          ? "Estamos preparando seu pedido"
+                          : pedidoAtual.status === "aceito"
+                            ? "Pedido aceito pela loja!"
+                            : "Recebemos seu pedido!"}
+                  </h2>
                   <span className="acomp-total num">{fmt(pedidoAtual.total)}</span>
                 </div>
 
@@ -1419,7 +1438,7 @@ export default function PedidoApp() {
                     { key: "concluido", label: pedidoAtual.tipoEntrega === "entrega" ? "Entregue" : "Retirado" },
                   ].map((etapa, i) => {
                     const indiceAtual = ETAPAS.indexOf(pedidoAtual.status);
-                    const estado = i < indiceAtual ? "feito" : i === indiceAtual ? "atual" : "futuro";
+                    const estado = pedidoAtual.status === "concluido" || i < indiceAtual ? "feito" : i === indiceAtual ? "atual" : "futuro";
                     return (
                       <li key={etapa.key} className={`etapa is-${estado}`}>
                         <div className="etapa-marca">
