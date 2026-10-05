@@ -8,6 +8,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from "recharts";
 import { supabase } from "./supabaseClient";
 import { LOGO_URL } from "./logo";
+import Financeiro from "./Financeiro";
 
 const fmt = (n) => (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -361,7 +362,7 @@ export default function AdminApp() {
   const [funcionarios, setFuncionarios] = useState([]);
   const [bairrosEntrega, setBairrosEntrega] = useState([]);
   const [diarias, setDiarias] = useState([]);
-  const [tab, setTab] = useState("pedidos"); // pedidos | caixa | compras | relatorios | cardapio | config
+  const [tab, setTab] = useState("pedidos"); // pedidos | caixa | compras | equipe | relatorios | financeiro | cardapio | contatos | config
   const [toast, setToast] = useState(null);
   const [somAtivo, setSomAtivo] = useState(false);
   const audioCtxRef = useRef(null);
@@ -1277,19 +1278,24 @@ export default function AdminApp() {
     setNotaVisualizacao({ carregando: false, url: data.signedUrl, erro: null });
   };
 
-  const [formFechamentoDia, setFormFechamentoDia] = useState({ dinheiro: "", cartao: "", pix: "" });
+  const [formFechamentoDia, setFormFechamentoDia] = useState({ dinheiro: "", cartao: "", pix: "", data: dataLocalISO() });
 
   const lancarFechamentoDia = async () => {
     const entradas = [
-      { forma: "Dinheiro", valor: formFechamentoDia.dinheiro },
-      { forma: "Cartão", valor: formFechamentoDia.cartao },
-      { forma: "Pix", valor: formFechamentoDia.pix },
+      { campo: "dinheiro", forma: "Dinheiro", valor: formFechamentoDia.dinheiro },
+      { campo: "cartao", forma: "Cartão", valor: formFechamentoDia.cartao },
+      { campo: "pix", forma: "Pix", valor: formFechamentoDia.pix },
     ].filter((e) => e.valor && Number(e.valor) > 0);
     if (entradas.length === 0) return;
+    // data das vendas: só grava data_referencia quando não é hoje (hoje = o próprio dia do lançamento)
+    const dataVendas = formFechamentoDia.data || dataLocalISO();
+    const extra = dataVendas !== dataLocalISO() ? { data_referencia: dataVendas } : {};
     for (const e of entradas) {
-      await lancarMovimento({ tipo: "venda", valor: Number(e.valor), forma_pagamento: e.forma, descricao: "Total do dia" });
+      const mov = await lancarMovimento({ tipo: "venda", valor: Number(e.valor), forma_pagamento: e.forma, descricao: "Total do dia", ...extra });
+      if (!mov) return; // deu erro: mantém o que falta no formulário (o que já foi lançado é limpo, para não duplicar ao tentar de novo)
+      setFormFechamentoDia((f) => ({ ...f, [e.campo]: "" }));
     }
-    setFormFechamentoDia({ dinheiro: "", cartao: "", pix: "" });
+    setFormFechamentoDia({ dinheiro: "", cartao: "", pix: "", data: dataLocalISO() });
     showToast("Vendas do dia lançadas");
   };
 
@@ -1354,13 +1360,8 @@ export default function AdminApp() {
   const pedidosConcluidos = useMemo(() => pedidos.filter((p) => p.status === "concluido"), [pedidos]);
 
   const relatorio = useMemo(() => {
-    const trintaDiasAtras = new Date();
-    trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
-    const trintaDiasAtrasISO = trintaDiasAtras.toISOString();
-
-    const deliveryHoje = pedidosConcluidos.filter((p) => (p.createdAt || "").slice(0, 10) === hojeISO).reduce((s, p) => s + p.total, 0);
+    // faturamento = só o que é lançado no Caixa (o fechamento do dia já inclui os pedidos do site)
     const balcaoHoje = vendasBalcaoRelatorio.filter((m) => (m.createdAt || "").slice(0, 10) === hojeISO).reduce((s, m) => s + m.valor, 0);
-    const deliveryMes = pedidosConcluidos.filter((p) => (p.createdAt || "") >= trintaDiasAtrasISO).reduce((s, p) => s + p.total, 0);
     const balcaoMes = vendasBalcaoRelatorio.reduce((s, m) => s + m.valor, 0);
 
     // gráfico dos últimos 14 dias
@@ -1370,9 +1371,8 @@ export default function AdminApp() {
       d.setDate(d.getDate() - i);
       const iso = d.toISOString().slice(0, 10);
       const label = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-      const delivery = pedidosConcluidos.filter((p) => (p.createdAt || "").slice(0, 10) === iso).reduce((s, p) => s + p.total, 0);
       const balcao = vendasBalcaoRelatorio.filter((m) => (m.createdAt || "").slice(0, 10) === iso).reduce((s, m) => s + m.valor, 0);
-      dias.push({ label, delivery: Number(delivery.toFixed(2)), balcao: Number(balcao.toFixed(2)), total: Number((delivery + balcao).toFixed(2)) });
+      dias.push({ label, balcao: Number(balcao.toFixed(2)) });
     }
 
     // produtos mais vendidos (baseado nos pedidos de delivery concluídos)
@@ -1387,7 +1387,7 @@ export default function AdminApp() {
       .sort((a, b) => b.qtd - a.qtd)
       .slice(0, 6);
 
-    return { deliveryHoje, balcaoHoje, deliveryMes, balcaoMes, dias, maisVendidos };
+    return { balcaoHoje, balcaoMes, dias, maisVendidos };
   }, [pedidosConcluidos, vendasBalcaoRelatorio, hojeISO]);
 
   // ---------- configurações (taxa de entrega + horário de funcionamento) ----------
@@ -1987,6 +1987,10 @@ export default function AdminApp() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
                     <div>
+                      <FieldLabel>Data das vendas</FieldLabel>
+                      <input type="date" value={formFechamentoDia.data} max={dataLocalISO()} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, data: e.target.value }))} style={inputStyle} />
+                    </div>
+                    <div>
                       <FieldLabel>Dinheiro</FieldLabel>
                       <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.dinheiro} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, dinheiro: e.target.value }))} style={inputStyle} />
                     </div>
@@ -2502,6 +2506,23 @@ export default function AdminApp() {
           </>
         )}
 
+        {tab === "financeiro" && (
+          <Financeiro
+            supabase={supabase}
+            C={C}
+            fmt={fmt}
+            Card={Card}
+            FieldLabel={FieldLabel}
+            EmptyState={EmptyState}
+            inputStyle={inputStyle}
+            btnPrimary={btnPrimary}
+            btnOutline={btnOutline}
+            iconBtnStyle={iconBtnStyle}
+            showToast={showToast}
+            dataLocalISO={dataLocalISO}
+          />
+        )}
+
         {tab === "relatorios" && (
           <>
             {carregandoRelatorio ? (
@@ -2512,16 +2533,12 @@ export default function AdminApp() {
               <>
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: C.orangeText, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Faturamento de hoje</div>
-                  <div className="mono" style={{ fontSize: 30, fontWeight: 700, color: C.text, marginBottom: 8 }}>{fmt(relatorio.deliveryHoje + relatorio.balcaoHoje)}</div>
-                  <div style={{ display: "flex", gap: 16 }}>
-                    <span style={{ fontSize: 12, color: C.textSoft }}><Bike size={11} style={{ verticalAlign: -1 }} /> Delivery: <b style={{ color: C.text }}>{fmt(relatorio.deliveryHoje)}</b></span>
-                    <span style={{ fontSize: 12, color: C.textSoft }}><Store size={11} style={{ verticalAlign: -1 }} /> Balcão: <b style={{ color: C.text }}>{fmt(relatorio.balcaoHoje)}</b></span>
-                  </div>
+                  <div className="mono" style={{ fontSize: 30, fontWeight: 700, color: C.text, marginBottom: 8 }}>{fmt(relatorio.balcaoHoje)}</div>
+                  <div style={{ fontSize: 12, color: C.textSoft }}><Store size={11} style={{ verticalAlign: -1 }} /> Vendas lançadas no Caixa</div>
                 </Card>
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                  <MiniStat label="Delivery (30 dias)" value={fmt(relatorio.deliveryMes)} />
-                  <MiniStat label="Balcão (30 dias)" value={fmt(relatorio.balcaoMes)} />
+                  <MiniStat label="Vendas (30 dias)" value={fmt(relatorio.balcaoMes)} />
                 </div>
 
                 <Card style={{ marginBottom: 14 }}>
@@ -2533,14 +2550,12 @@ export default function AdminApp() {
                         <XAxis dataKey="label" tick={{ fontSize: 10, fill: C.textFaint }} axisLine={false} tickLine={false} interval={1} />
                         <YAxis tick={{ fontSize: 10, fill: C.textFaint }} axisLine={false} tickLine={false} width={36} />
                         <Tooltip formatter={(v) => fmt(v)} contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, background: C.cardAlt, fontSize: 12, color: C.text }} labelStyle={{ color: C.textSoft }} />
-                        <Line type="monotone" dataKey="delivery" name="Delivery" stroke={C.orange} strokeWidth={2.2} dot={false} />
-                        <Line type="monotone" dataKey="balcao" name="Balcão" stroke={C.green} strokeWidth={2.2} dot={false} />
+                        <Line type="monotone" dataKey="balcao" name="Vendas" stroke={C.green} strokeWidth={2.2} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
                   <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 8 }}>
-                    <span style={{ fontSize: 11.5, color: C.textSoft, display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 8, height: 8, borderRadius: 4, background: C.orange }} /> Delivery</span>
-                    <span style={{ fontSize: 11.5, color: C.textSoft, display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Balcão</span>
+                    <span style={{ fontSize: 11.5, color: C.textSoft, display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Vendas</span>
                   </div>
                 </Card>
 
@@ -2937,6 +2952,7 @@ export default function AdminApp() {
             { id: "compras", label: "Compras", icon: Package },
             { id: "equipe", label: "Equipe", icon: Users },
             { id: "relatorios", label: "Relatórios", icon: BarChart3 },
+            { id: "financeiro", label: "Financeiro", icon: Banknote },
             { id: "cardapio", label: "Cardápio", icon: UtensilsCrossed },
             { id: "contatos", label: "Contatos", icon: Contact },
           ].map(({ id, label, icon: Icon, badge }) => {
