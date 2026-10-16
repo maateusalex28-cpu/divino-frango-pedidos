@@ -157,6 +157,7 @@ const mapPedidoFromDb = (r) => ({
   total: Number(r.total),
   status: r.status,
   createdAt: r.created_at,
+  dataPedido: r.data_pedido || null,
 });
 
 // id do pedido gerado no navegador (UUID v4); é ele que permite ao cliente consultar só o próprio pedido
@@ -186,6 +187,12 @@ const lerStatusPedido = async (id) => {
 };
 
 const ETAPAS = ["pendente", "aceito", "preparando", "pronto", "concluido"];
+
+// "sábado, 17/10" quando o pedido é para um dia futuro; vazio se for para hoje
+const textoDataAgendada = (iso) => {
+  if (!iso || iso <= dataLocalISO()) return "";
+  return new Date(iso + "T00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+};
 
 const inputStyle = {
   width: "100%", padding: "13px 14px", borderRadius: 12, border: `1px solid ${C.border}`,
@@ -1427,26 +1434,34 @@ export default function PedidoApp() {
                             : "Recebemos seu pedido!"}
                   </h2>
                   <span className="acomp-total num">{fmt(pedidoAtual.total)}</span>
+                  {textoDataAgendada(pedidoAtual.dataPedido) && pedidoAtual.status !== "concluido" && (
+                    <div className="acomp-agenda">
+                      <CalendarClock size={15} /> Agendado para {textoDataAgendada(pedidoAtual.dataPedido)}
+                    </div>
+                  )}
                 </div>
 
                 <ol className="etapas">
                   {[
-                    { key: "pendente", label: "Pedido recebido" },
-                    { key: "aceito", label: "Aceito pela loja" },
-                    { key: "preparando", label: "Em preparo" },
-                    { key: "pronto", label: pedidoAtual.tipoEntrega === "entrega" ? "Saiu para entrega" : "Pronto para retirada" },
-                    { key: "concluido", label: pedidoAtual.tipoEntrega === "entrega" ? "Entregue" : "Retirado" },
+                    { key: "pendente", label: "Pedido recebido", sub: "Aguardando a loja confirmar", Icone: Clock },
+                    { key: "aceito", label: "Aceito pela loja", sub: "A loja confirmou. O preparo começa em seguida", Icone: ClipboardCheck },
+                    { key: "preparando", label: "Em preparo", sub: "Estamos preparando seu frango", Icone: Flame },
+                    pedidoAtual.tipoEntrega === "entrega"
+                      ? { key: "pronto", label: "Saiu para entrega", sub: "Seu pedido está a caminho", Icone: Bike }
+                      : { key: "pronto", label: "Pronto para retirada", sub: "Pode vir buscar no balcão", Icone: Store },
+                    { key: "concluido", label: pedidoAtual.tipoEntrega === "entrega" ? "Entregue" : "Retirado", sub: "", Icone: Check },
                   ].map((etapa, i) => {
                     const indiceAtual = ETAPAS.indexOf(pedidoAtual.status);
                     const estado = pedidoAtual.status === "concluido" || i < indiceAtual ? "feito" : i === indiceAtual ? "atual" : "futuro";
+                    const IconeEtapa = etapa.Icone;
                     return (
                       <li key={etapa.key} className={`etapa is-${estado}`}>
                         <div className="etapa-marca">
-                          {estado === "feito" ? <Check size={15} strokeWidth={2.6} /> : estado === "atual" ? <CircleDashed size={15} className="spin-loader" /> : null}
+                          {estado === "feito" ? <Check size={15} strokeWidth={2.6} /> : estado === "atual" ? <IconeEtapa size={15} /> : null}
                         </div>
                         <div>
                           <div className="etapa-label">{etapa.label}</div>
-                          {estado === "atual" && <div className="etapa-sub">Em andamento...</div>}
+                          {estado === "atual" && etapa.sub && <div className="etapa-sub">{etapa.sub}</div>}
                         </div>
                       </li>
                     );
@@ -1774,6 +1789,12 @@ const CSS = `
   .etapa.is-futuro .etapa-label { color: ${C.textFaint}; }
   .etapa.is-atual .etapa-label { font-weight: 800; }
   .etapa-sub { font-size: 13px; color: ${C.orangeText}; margin-top: 2px; }
+  .etapa.is-atual .etapa-marca { animation: etapa-pulso 1.8s ease-out infinite; }
+  @keyframes etapa-pulso {
+    0% { box-shadow: inset 0 0 0 2px ${C.orange}, 0 0 0 0 rgba(245,148,10,.55); }
+    70%, 100% { box-shadow: inset 0 0 0 2px ${C.orange}, 0 0 0 9px rgba(245,148,10,0); }
+  }
+  .acomp-agenda { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 6px 12px; border-radius: 999px; background: ${C.orangeSoft}; color: ${C.orangeText}; font-size: 13px; font-weight: 700; text-transform: capitalize; }
 
   /* barra do carrinho e aviso */
   .cartbar { position: fixed; z-index: 40; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 18px 10px 10px; border: none; border-radius: 999px; background: ${C.orange}; color: ${C.ink}; box-shadow: 0 14px 34px -10px rgba(245,148,10,.75); animation: cartbar-in .32s cubic-bezier(.34,1.56,.64,1); }
