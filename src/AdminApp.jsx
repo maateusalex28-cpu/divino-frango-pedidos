@@ -8,7 +8,8 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from "recharts";
 import { supabase } from "./supabaseClient";
 import { LOGO_URL } from "./logo";
-import Financeiro from "./Financeiro";
+import FinanceiroHub from "./FinanceiroHub";
+import VendasDia from "./VendasDia";
 
 const fmt = (n) => (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -1278,40 +1279,36 @@ export default function AdminApp() {
     setNotaVisualizacao({ carregando: false, url: data.signedUrl, erro: null });
   };
 
-  const [formFechamentoDia, setFormFechamentoDia] = useState({ dinheiro: "", cartao: "", pix: "", data: dataLocalISO() });
-
-  const lancarFechamentoDia = async () => {
-    const entradas = [
-      { campo: "dinheiro", forma: "Dinheiro", valor: formFechamentoDia.dinheiro },
-      { campo: "cartao", forma: "Cartão", valor: formFechamentoDia.cartao },
-      { campo: "pix", forma: "Pix", valor: formFechamentoDia.pix },
-    ].filter((e) => e.valor && Number(e.valor) > 0);
-    if (entradas.length === 0) return;
-    // data das vendas: só grava data_referencia quando não é hoje (hoje = o próprio dia do lançamento)
-    const dataVendas = formFechamentoDia.data || dataLocalISO();
-    const extra = dataVendas !== dataLocalISO() ? { data_referencia: dataVendas } : {};
-    for (const e of entradas) {
-      const mov = await lancarMovimento({ tipo: "venda", valor: Number(e.valor), forma_pagamento: e.forma, descricao: "Total do dia", ...extra });
-      if (!mov) return; // deu erro: mantém o que falta no formulário (o que já foi lançado é limpo, para não duplicar ao tentar de novo)
-      setFormFechamentoDia((f) => ({ ...f, [e.campo]: "" }));
-    }
-    setFormFechamentoDia({ dinheiro: "", cartao: "", pix: "", data: dataLocalISO() });
-    showToast("Vendas do dia lançadas");
-  };
+  // vendas do dia: a tela VendasDia grava na tabela fechamentos_vendas (não mais em movimentacoes_caixa).
+  // Aqui só lemos os fechamentos do período do caixa aberto, para o saldo em dinheiro continuar certo.
+  const [vendasRefresh, setVendasRefresh] = useState(0);
+  const [fechamentosCaixa, setFechamentosCaixa] = useState([]);
+  useEffect(() => {
+    if (!caixaAtual) { setFechamentosCaixa([]); return; }
+    let vivo = true;
+    (async () => {
+      const desde = dataLocalISO(new Date(caixaAtual.abertoEm));
+      const { data, error } = await supabase.from("fechamentos_vendas").select("data, dinheiro, cartao, pix").gte("data", desde);
+      if (vivo) setFechamentosCaixa(error ? [] : data || []);
+    })();
+    return () => { vivo = false; };
+  }, [caixaAtual, vendasRefresh]);
 
   const totaisCaixa = useMemo(() => {
     const vendas = movimentacoes.filter((m) => m.tipo === "venda");
     const sangrias = movimentacoes.filter((m) => m.tipo === "sangria");
     const suprimentos = movimentacoes.filter((m) => m.tipo === "suprimento");
     const compras = movimentacoes.filter((m) => m.tipo === "compra");
-    const totalVendas = vendas.reduce((s, m) => s + m.valor, 0);
-    const vendasDinheiro = vendas.filter((m) => m.formaPagamento === "Dinheiro").reduce((s, m) => s + m.valor, 0);
+    const fechVendas = fechamentosCaixa.reduce((s, f) => s + Number(f.dinheiro) + Number(f.cartao) + Number(f.pix), 0);
+    const fechDinheiro = fechamentosCaixa.reduce((s, f) => s + Number(f.dinheiro), 0);
+    const totalVendas = vendas.reduce((s, m) => s + m.valor, 0) + fechVendas;
+    const vendasDinheiro = vendas.filter((m) => m.formaPagamento === "Dinheiro").reduce((s, m) => s + m.valor, 0) + fechDinheiro;
     const totalSangrias = sangrias.reduce((s, m) => s + m.valor, 0);
     const totalSuprimentos = suprimentos.reduce((s, m) => s + m.valor, 0);
     const totalCompras = compras.reduce((s, m) => s + m.valor, 0);
     const saldoDinheiro = (caixaAtual?.valorAbertura || 0) + vendasDinheiro + totalSuprimentos - totalSangrias - totalCompras;
     return { totalVendas, vendasDinheiro, totalSangrias, totalSuprimentos, totalCompras, saldoDinheiro };
-  }, [movimentacoes, caixaAtual]);
+  }, [movimentacoes, caixaAtual, fechamentosCaixa]);
 
   const fecharCaixa = async () => {
     if (!caixaAtual) return;
@@ -1345,7 +1342,15 @@ export default function AdminApp() {
           .eq("tipo", "venda")
           .gte("created_at", desde.toISOString())
           .order("created_at", { ascending: false });
-        if (!error) setVendasBalcaoRelatorio((data || []).map(mapMovFromDb));
+        // fechamentos do dia (tela "Vendas do dia"): viram uma venda por forma de pagamento, no próprio dia
+        const { data: fech } = await supabase.from("fechamentos_vendas").select("id, data, dinheiro, cartao, pix").gte("data", dataLocalISO(desde));
+        const dosFechamentos = [];
+        (fech || []).forEach((f) => {
+          [["Dinheiro", f.dinheiro], ["Cartão", f.cartao], ["Pix", f.pix]].forEach(([forma, v]) => {
+            if (Number(v) > 0) dosFechamentos.push({ id: `${f.id}-${forma}`, tipo: "venda", valor: Number(v), formaPagamento: forma, createdAt: `${f.data}T12:00:00` });
+          });
+        });
+        if (!error) setVendasBalcaoRelatorio([...(data || []).map(mapMovFromDb), ...dosFechamentos]);
       } catch (e) {
         showToast("Erro ao carregar relatório");
       } finally {
@@ -1980,33 +1985,12 @@ export default function AdminApp() {
                   <MiniStat label="Saldo em dinheiro" value={fmt(totaisCaixa.saldoDinheiro)} />
                 </div>
 
-                <Card style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Lançar vendas do dia</div>
-                  <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 10 }}>
-                    Se você prefere lançar o total vendido no fim do dia (em vez de venda por venda), preencha por forma de pagamento.
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
-                    <div>
-                      <FieldLabel>Data das vendas</FieldLabel>
-                      <input type="date" value={formFechamentoDia.data} max={dataLocalISO()} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, data: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <FieldLabel>Dinheiro</FieldLabel>
-                      <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.dinheiro} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, dinheiro: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <FieldLabel>Cartão</FieldLabel>
-                      <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.cartao} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, cartao: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <FieldLabel>Pix</FieldLabel>
-                      <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.pix} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, pix: e.target.value }))} style={inputStyle} />
-                    </div>
-                  </div>
-                  <button onClick={lancarFechamentoDia} style={{ ...btnPrimary, width: "100%" }}>
-                    <Check size={15} /> Lançar vendas do dia
-                  </button>
-                </Card>
+                <VendasDia
+                  supabase={supabase} C={C} fmt={fmt} Card={Card} FieldLabel={FieldLabel} EmptyState={EmptyState}
+                  inputStyle={inputStyle} btnPrimary={btnPrimary} btnOutline={btnOutline} iconBtnStyle={iconBtnStyle}
+                  showToast={showToast} dataLocalISO={dataLocalISO}
+                  mostrarLista={false} onSaved={() => setVendasRefresh((n) => n + 1)}
+                />
 
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Suprimento (adicionar dinheiro ao caixa)</div>
@@ -2507,7 +2491,7 @@ export default function AdminApp() {
         )}
 
         {tab === "financeiro" && (
-          <Financeiro
+          <FinanceiroHub
             supabase={supabase}
             C={C}
             fmt={fmt}
