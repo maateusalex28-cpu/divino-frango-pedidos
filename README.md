@@ -347,3 +347,12 @@ A aba Balcão tem duas versões no código. Em `src/AdminApp.jsx`, a constante `
 - `"simples"`: a versão com três telas (Lançar pedido, Todos os pedidos, Reservas).
 
 Para voltar à versão anterior, troque `"consumer"` por `"simples"` e publique de novo. Ambas usam o mesmo SQL (`supabase/migracao-balcao-reservas.sql`).
+
+#### Novo pedido na versão Consumer
+
+O botão **Novo pedido (F2)** abre uma janela parecida com a do Consumer:
+
+- **Retirar no local:** só o nome (opcional) e os itens do cardápio. Pode marcar "Já entregue" para sair como Concluído.
+- **Entrega:** nome, telefone e **CEP**, que preenche rua e bairro sozinho (consulta o ViaCEP; precisa de internet). Depois é só informar número e complemento. A taxa vem do bairro cadastrado em Configurações (ou da taxa padrão) e pode ser editada na hora. Tem campo de troco para pagamento em dinheiro.
+- **Cliente:** ao digitar o nome, aparecem clientes que já fizeram pedido (site ou balcão) e os contatos cadastrados. Ao escolher um, o telefone e o último endereço de entrega são preenchidos. Cliente novo fica guardado no próprio pedido, sem cadastro separado.
+- Não existe campo de entregador (não há essa informação no banco hoje).

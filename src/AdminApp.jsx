@@ -1953,6 +1953,8 @@ export default function AdminApp() {
             codigoPedido={codigoPedido}
             labelStatus={LABEL_STATUS}
             atualizarStatusPedido={atualizarStatusPedido}
+            bairrosEntrega={bairrosEntrega}
+            taxaPadrao={Number(taxaEntregaForm) || 0}
             onPedidoCriado={(row) =>
               setPedidos((prev) => (prev.some((p) => p.id === row.id) ? prev : [mapPedidoFromDb(row), ...prev]))
             }

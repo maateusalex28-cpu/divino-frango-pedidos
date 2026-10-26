@@ -12,6 +12,7 @@ const paraNumero = (v) => {
 const arred = (n) => Math.round(n * 100) / 100;
 const semAcento = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const agoraISO = () => new Date().toISOString();
+const soDigitos = (v) => String(v || "").replace(/\D/g, "");
 
 const fmtAbertura = (iso) => {
   if (!iso) return "";
@@ -60,6 +61,7 @@ function Modal({ C, titulo, onClose, largura = 640, children }) {
 export default function BalcaoConsumer({
   supabase, C, fmt, FieldLabel, EmptyState, inputStyle, btnPrimary, btnOutline, iconBtnStyle,
   showToast, dataLocalISO, cardapio, pedidos, codigoPedido, labelStatus, onPedidoCriado, atualizarStatusPedido,
+  bairrosEntrega, taxaPadrao,
 }) {
   const hoje = dataLocalISO();
   const [dia, setDia] = useState(hoje);
@@ -138,21 +140,119 @@ export default function BalcaoConsumer({
   const somaTotal = arred(validos.reduce((s, l) => s + l.total, 0));
   const detalhe = linhas.find((l) => l.key === detalheKey) || null;
 
-  // ---------------- Novo pedido (balcão) ----------------
+  // ---------------- Novo pedido (retirar no balcão ou entrega) ----------------
   const [carrinho, setCarrinho] = useState([]);
   const [busca, setBusca] = useState("");
+  const [tipo, setTipo] = useState("retirada"); // retirada | entrega
   const [nome, setNome] = useState("");
   const [telefone, setTelefone] = useState("");
+  const [cep, setCep] = useState("");
+  const [rua, setRua] = useState("");
+  const [numeroEnd, setNumeroEnd] = useState("");
+  const [compl, setCompl] = useState("");
+  const [bairro, setBairro] = useState("");
+  const [referencia, setReferencia] = useState("");
+  const [taxaTxt, setTaxaTxt] = useState("");
+  const [taxaManual, setTaxaManual] = useState(false);
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const [forma, setForma] = useState("Dinheiro");
+  const [trocoPara, setTrocoPara] = useState("");
   const [obs, setObs] = useState("");
   const [entregueNaHora, setEntregueNaHora] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [contatos, setContatos] = useState([]);
+  const [mostrarSug, setMostrarSug] = useState(false);
+
+  // contatos já cadastrados (se a tabela existir); erros são ignorados
+  useEffect(() => {
+    if (modal !== "pedido" || contatos.length) return;
+    supabase.from("contatos").select("nome, telefone").limit(500).then(({ data }) => {
+      if (data) setContatos(data);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal]);
+
+  // clientes = quem já fez pedido (site ou balcão) + contatos; o endereço vem do último pedido de entrega
+  const clientes = useMemo(() => {
+    const mapa = new Map();
+    const chave = (n, t) => soDigitos(t) || semAcento(n);
+    [...(pedidos || [])]
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+      .forEach((p) => {
+        if (!p.clienteNome || p.clienteNome === "Balcão") return;
+        const k = chave(p.clienteNome, p.clienteTelefone);
+        const atual = mapa.get(k) || {};
+        const novo = { ...atual, nome: p.clienteNome, telefone: p.clienteTelefone || atual.telefone || "" };
+        if (p.tipoEntrega === "entrega" && p.endereco) {
+          novo.cep = p.cep || ""; novo.endereco = p.endereco; novo.bairro = p.bairro || ""; novo.referencia = p.referencia || "";
+        }
+        mapa.set(k, novo);
+      });
+    (contatos || []).forEach((c) => {
+      if (!c.nome) return;
+      const k = chave(c.nome, c.telefone);
+      if (!mapa.has(k)) mapa.set(k, { nome: c.nome, telefone: c.telefone || "" });
+    });
+    return Array.from(mapa.values());
+  }, [pedidos, contatos]);
+
+  const sugestoes = useMemo(() => {
+    const t = nome.trim();
+    if (!mostrarSug || t.length < 2) return [];
+    const n = semAcento(t);
+    const d = soDigitos(t);
+    return clientes
+      .filter((c) => semAcento(c.nome).includes(n) || (d.length >= 3 && soDigitos(c.telefone).includes(d)))
+      .slice(0, 6);
+  }, [clientes, nome, mostrarSug]);
+
+  const escolherCliente = (c) => {
+    setNome(c.nome);
+    setTelefone(c.telefone || "");
+    if (c.endereco) {
+      setCep(c.cep || ""); setRua(c.endereco); setNumeroEnd(""); setCompl("");
+      setBairro(c.bairro || ""); setReferencia(c.referencia || ""); setTaxaManual(false);
+    }
+    setMostrarSug(false);
+  };
+
+  const buscarCep = async (digitos) => {
+    setBuscandoCep(true);
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${digitos}/json/`);
+      const d = await r.json();
+      if (d.erro) {
+        showToast("CEP não encontrado");
+      } else {
+        setRua(d.logradouro || "");
+        setBairro(d.bairro || "");
+        setTaxaManual(false);
+      }
+    } catch (e) {
+      showToast("Não foi possível buscar o CEP");
+    } finally {
+      setBuscandoCep(false);
+    }
+  };
+  const onCep = (v) => {
+    const d = soDigitos(v).slice(0, 8);
+    setCep(d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d);
+    if (d.length === 8) buscarCep(d);
+  };
+
+  // taxa: a do bairro cadastrado; se não houver, a taxa padrão. Dá para editar na mão.
+  const taxaSugerida = useMemo(() => {
+    const b = (bairrosEntrega || []).find((x) => x.ativo !== false && semAcento(x.nome) === semAcento(bairro));
+    return b ? Number(b.taxa) || 0 : Number(taxaPadrao) || 0;
+  }, [bairrosEntrega, bairro, taxaPadrao]);
+  const taxa = tipo === "entrega" ? (taxaManual ? paraNumero(taxaTxt) : taxaSugerida) : 0;
 
   const itensVisiveis = useMemo(
     () => (cardapio || []).filter((c) => c.disponivel !== false && (!busca || semAcento(c.nome).includes(semAcento(busca)))),
     [cardapio, busca]
   );
-  const totalCarrinho = useMemo(() => arred(carrinho.reduce((s, x) => s + x.preco * x.qtd, 0)), [carrinho]);
+  const subtotalCarrinho = useMemo(() => arred(carrinho.reduce((s, x) => s + x.preco * x.qtd, 0)), [carrinho]);
+  const totalPedido = arred(subtotalCarrinho + taxa);
 
   const adicionar = (item) =>
     setCarrinho((prev) => {
@@ -174,24 +274,42 @@ export default function BalcaoConsumer({
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  const limparPedido = () => {
+    setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
+    setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
+    setForma("Dinheiro"); setTipo("retirada"); setEntregueNaHora(true);
+  };
+
   const lancarPedido = async () => {
     if (!carrinho.length) return showToast("Adicione pelo menos um item");
+    if (tipo === "entrega") {
+      if (!nome.trim()) return showToast("Informe o nome do cliente");
+      if (!rua.trim()) return showToast("Informe o endereço de entrega");
+    }
     setSalvando(true);
+    const enderecoCompleto = `${[rua.trim(), numeroEnd.trim()].filter(Boolean).join(", ")}${compl.trim() ? ` - ${compl.trim()}` : ""}`;
+    const valorTroco = paraNumero(trocoPara);
+    const comTroco = forma === "Dinheiro" && valorTroco > 0;
+    const concluir = tipo === "retirada" && entregueNaHora;
     const linha = {
       cliente_nome: nome.trim() || "Balcão",
       cliente_telefone: telefone.trim(),
-      tipo_entrega: "retirada",
+      tipo_entrega: tipo,
       forma_pagamento: forma,
-      precisa_troco: false,
+      precisa_troco: comTroco,
+      troco_para: comTroco ? valorTroco : null,
       itens: carrinho.map(({ id, nome: n, qtd, preco }) => ({ id, nome: n, qtd, preco })),
-      subtotal: totalCarrinho,
-      taxa_entrega: 0,
-      total: totalCarrinho,
+      subtotal: subtotalCarrinho,
+      taxa_entrega: arred(taxa),
+      total: totalPedido,
       observacao: obs.trim() || null,
-      status: entregueNaHora ? "concluido" : "aceito",
+      status: concluir ? "concluido" : "aceito",
       origem: "balcao",
       data_pedido: hoje,
-      ...(entregueNaHora ? { concluido_em: agoraISO() } : {}),
+      ...(concluir ? { concluido_em: agoraISO() } : {}),
+      ...(tipo === "entrega"
+        ? { cep: cep || null, endereco: enderecoCompleto, bairro: bairro.trim() || null, referencia: referencia.trim() || null }
+        : {}),
     };
     const { data, error } = await supabase.from("pedidos").insert(linha).select().single();
     setSalvando(false);
@@ -203,7 +321,7 @@ export default function BalcaoConsumer({
     }
     if (onPedidoCriado) onPedidoCriado(data);
     showToast(`Pedido #${data.numero ?? data.numero_pedido ?? String(data.id).slice(0, 4).toUpperCase()} lançado`);
-    setCarrinho([]); setNome(""); setTelefone(""); setObs(""); setForma("Dinheiro");
+    limparPedido();
     setDia(hoje);
     setModal(null);
   };
@@ -363,8 +481,64 @@ export default function BalcaoConsumer({
 
       {/* modal: novo pedido */}
       {modal === "pedido" && (
-        <Modal C={C} titulo="Novo pedido (balcão)" onClose={() => setModal(null)}>
-          <div style={{ position: "relative", marginBottom: 10 }}>
+        <Modal C={C} titulo="Novo pedido" onClose={() => setModal(null)} largura={720}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button onClick={() => setTipo("retirada")} style={{ ...chip(tipo === "retirada"), flex: 1, padding: "10px 12px" }}>Retirar no local</button>
+            <button onClick={() => setTipo("entrega")} style={{ ...chip(tipo === "entrega"), flex: 1, padding: "10px 12px" }}>Entrega</button>
+          </div>
+
+          <FieldLabel>Cliente</FieldLabel>
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <input
+              value={nome}
+              onChange={(e) => { setNome(e.target.value); setMostrarSug(true); }}
+              onBlur={() => setTimeout(() => setMostrarSug(false), 150)}
+              placeholder={tipo === "retirada" ? "Nome (opcional) — digite para buscar cliente" : "Nome — digite para buscar cliente"}
+              style={inputStyle}
+            />
+            {sugestoes.length > 0 && (
+              <div style={{ background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
+                {sugestoes.map((c, i) => (
+                  <div
+                    key={i}
+                    onMouseDown={(e) => { e.preventDefault(); escolherCliente(c); }}
+                    style={{ padding: "9px 12px", fontSize: 13, borderBottom: `1px solid ${C.borderSoft}`, cursor: "pointer" }}
+                  >
+                    <b>{c.nome}</b>{c.telefone ? ` · ${c.telefone}` : ""}
+                    {c.endereco && <div style={{ fontSize: 11.5, color: C.textSoft }}>{c.endereco}{c.bairro ? ` - ${c.bairro}` : ""}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="Telefone" inputMode="tel" style={{ ...inputStyle, marginBottom: 12 }} />
+
+          {tipo === "entrega" && (
+            <>
+              <FieldLabel>Endereço de entrega</FieldLabel>
+              <div style={{ position: "relative", marginBottom: 8 }}>
+                <input value={cep} onChange={(e) => onCep(e.target.value)} placeholder="CEP (preenche o endereço sozinho)" inputMode="numeric" style={inputStyle} />
+                {buscandoCep && <div style={{ position: "absolute", right: 12, top: 11, color: C.textSoft }}><Loader2 size={16} /></div>}
+              </div>
+              <input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Endereço (rua)" style={{ ...inputStyle, marginBottom: 8 }} />
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input value={numeroEnd} onChange={(e) => setNumeroEnd(e.target.value)} placeholder="Número" style={inputStyle} />
+                <input value={compl} onChange={(e) => setCompl(e.target.value)} placeholder="Complemento" style={inputStyle} />
+              </div>
+              <input value={bairro} onChange={(e) => { setBairro(e.target.value); setTaxaManual(false); }} placeholder="Bairro" style={{ ...inputStyle, marginBottom: 8 }} />
+              <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Referência (opcional)" style={{ ...inputStyle, marginBottom: 8 }} />
+              <FieldLabel>Taxa de entrega (R$)</FieldLabel>
+              <input
+                value={taxaManual ? taxaTxt : String(taxaSugerida).replace(".", ",")}
+                onChange={(e) => { setTaxaManual(true); setTaxaTxt(e.target.value); }}
+                inputMode="decimal"
+                style={{ ...inputStyle, marginBottom: 12 }}
+              />
+            </>
+          )}
+
+          <FieldLabel>Itens</FieldLabel>
+          <div style={{ position: "relative", marginBottom: 8 }}>
             <Search size={15} style={{ position: "absolute", left: 11, top: 13, color: C.textFaint }} />
             <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar item do cardápio" style={{ ...inputStyle, paddingLeft: 33 }} />
           </div>
@@ -387,22 +561,32 @@ export default function BalcaoConsumer({
               <div style={{ minWidth: 70, textAlign: "right", fontWeight: 700, fontSize: 13 }}>{fmt(x.preco * x.qtd)}</div>
             </div>
           ))}
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, margin: "12px 0" }}>
-            <span>Total</span><span style={{ color: C.orangeText }}>{fmt(totalCarrinho)}</span>
+          <div style={{ margin: "12px 0", fontSize: 13, color: C.textSoft }}>
+            {tipo === "entrega" && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>Subtotal</span><span>{fmt(subtotalCarrinho)}</span></div>
+            )}
+            {tipo === "entrega" && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>Taxa de entrega</span><span>{fmt(taxa)}</span></div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, color: C.text, marginTop: 4 }}>
+              <span>Total</span><span style={{ color: C.orangeText }}>{fmt(totalPedido)}</span>
+            </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Cliente (opcional)" style={inputStyle} />
-            <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="Telefone" inputMode="tel" style={inputStyle} />
-          </div>
+          <FieldLabel>Pagamento</FieldLabel>
           <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
             {FORMAS.map((f) => (<button key={f} onClick={() => setForma(f)} style={chip(forma === f)}>{f}</button>))}
           </div>
+          {forma === "Dinheiro" && (
+            <input value={trocoPara} onChange={(e) => setTrocoPara(e.target.value)} placeholder="Troco para (R$) — opcional" inputMode="decimal" style={{ ...inputStyle, marginBottom: 10 }} />
+          )}
           <input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Observação (opcional)" style={{ ...inputStyle, marginBottom: 10 }} />
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.textSoft, marginBottom: 12 }}>
-            <input type="checkbox" checked={entregueNaHora} onChange={(e) => setEntregueNaHora(e.target.checked)} />
-            Já entregue ao cliente (marca como Concluído)
-          </label>
+          {tipo === "retirada" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.textSoft, marginBottom: 12 }}>
+              <input type="checkbox" checked={entregueNaHora} onChange={(e) => setEntregueNaHora(e.target.checked)} />
+              Já entregue ao cliente (marca como Concluído)
+            </label>
+          )}
           <button onClick={lancarPedido} disabled={salvando || carrinho.length === 0} style={{ ...btnPrimary, width: "100%", opacity: salvando || carrinho.length === 0 ? 0.6 : 1 }}>
             {salvando ? <Loader2 size={16} /> : <Check size={16} />} Lançar pedido
           </button>
