@@ -313,3 +313,37 @@ Sintaxe de todo o JSX/JS validada (parsing completo, sem erros). Na rodada 2 os 
 ## O que só dá pra confirmar depois do deploy
 
 Este ambiente não tem acesso à internet, então não foi possível rodar `npm install`/`npm run build` de verdade aqui. As dependências são padrão e estáveis — o teste real acontece no primeiro `npm install` + `npm run build`, seja no seu computador ou automaticamente na Vercel/Netlify. Qualquer erro nesse momento, me manda a mensagem que eu ajusto.
+
+## Nova aba Caixa (vendas do dia, compras e despesas, fechamento mensal)
+
+**Rode no SQL Editor do Supabase, depois do `migracao-financeiro.sql`:** [`supabase/migracao-caixa.sql`](./supabase/migracao-caixa.sql). Ordem completa: `migracao-loja-e-entrega.sql` -> `migracao-contatos.sql` -> `migracao-seguranca.sql` -> `migracao-financeiro.sql` -> `migracao-caixa.sql`. Pode rodar mais de uma vez; não apaga nada.
+
+- **Vendas do dia:** uma data, três valores (dinheiro, cartão e Pix) e o total calculado. Só existe um lançamento por data: se já houver, a tela avisa e mostra os valores para corrigir. Continua gravando em `movimentacoes_caixa` (tipo `venda`), então Relatórios e Financeiro enxergam igual.
+- **Compras e despesas:** categoria, forma de pagamento e situação (pago ou pendente). Pendente não sai do dinheiro até você registrar o pagamento (data e forma), na mesma linha, sem duplicar. As compras feitas na aba Compras aparecem no mesmo histórico (não são lançadas de novo). Outras despesas ficam na tabela `despesas`.
+- **Saldo em dinheiro:** só dinheiro físico. Cartão, Pix e contas pendentes não entram.
+- **Fechamento mensal:** saldo inicial (automático, a partir do mês anterior, ou informado), dinheiro contado e diferença; salvo em `fechamentos_caixa`.
+- A aba Compras não exige mais "abrir o caixa" para lançar uma compra.
+- Testes dos cálculos: `node tests/caixaCalculos.test.mjs`.
+
+## Rodada: aba Balcão (pedidos do balcão + reservas)
+
+Nova aba **Balcão** no painel, com três telas:
+
+- **Lançar pedido:** toque nos itens do cardápio, escolha a forma de pagamento (Dinheiro, Pix ou Cartão) e lance. O pedido entra na lista de pedidos como retirada, com origem "balcão". Se marcar "Já entregue ao cliente", ele já fica Concluído; senão fica Aceito e segue o fluxo normal da aba Pedidos. Pedido de balcão não toca alerta e não passa pelo aceite automático.
+- **Todos os pedidos:** lista do dia (escolha a data) com pedidos do **site** e do **balcão** juntos, com hora, origem, entrega/retirada, forma de pagamento, status e total. Dá para filtrar por origem. Aceitar, preparar e finalizar pedidos do site continua na aba Pedidos.
+- **Reservas:** encomendas para retirar (data, hora, o que foi pedido, valor, sinal pago). Botões Confirmar, Retirada, Cancelar, Reabrir, Excluir e link de WhatsApp.
+
+**Rode no SQL Editor do Supabase:** [`supabase/migracao-balcao-reservas.sql`](./supabase/migracao-balcao-reservas.sql). Ele cria a coluna `pedidos.origem` (padrão `site`) e a tabela `reservas`. Pode rodar mais de uma vez; não apaga nada.
+
+Observações:
+- Pedidos de balcão **não** entram na aba Caixa (o total do dia continua sendo lançado à mão lá).
+- Eles contam na lista de pedidos e podem aparecer em relatórios que somam pedidos concluídos.
+
+### Aba Balcão: duas versões
+
+A aba Balcão tem duas versões no código. Em `src/AdminApp.jsx`, a constante `BALCAO_VERSAO` escolhe qual aparece:
+
+- `"consumer"` (padrão): tela única, estilo Consumer. Tabela com Pedido, Abertura, Duração, Cliente, Origem, Status, Entrega, Total e Agendado para, juntando pedidos do site, do balcão e reservas. Botões **Novo pedido (F2)** e **Nova reserva** abrem janelas; clicar numa linha abre o detalhe com as ações (aceitar, pronto, concluir, cancelar).
+- `"simples"`: a versão com três telas (Lançar pedido, Todos os pedidos, Reservas).
+
+Para voltar à versão anterior, troque `"consumer"` por `"simples"` e publique de novo. Ambas usam o mesmo SQL (`supabase/migracao-balcao-reservas.sql`).

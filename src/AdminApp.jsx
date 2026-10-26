@@ -9,6 +9,14 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { supabase } from "./supabaseClient";
 import { LOGO_URL } from "./logo";
 import Financeiro from "./Financeiro";
+import Caixa from "./Caixa";
+import Balcao from "./Balcao";
+import BalcaoConsumer from "./BalcaoConsumer";
+
+// Versão da aba Balcão: "consumer" (tabela única, estilo Consumer) ou "simples" (3 telas).
+// Para voltar à versão anterior, troque "consumer" por "simples" abaixo.
+const BALCAO_VERSAO = "consumer";
+const BalcaoTela = BALCAO_VERSAO === "simples" ? Balcao : BalcaoConsumer;
 
 const fmt = (n) => (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -202,6 +210,7 @@ const mapPedidoFromDb = (r) => ({
   canceladoEm: r.cancelado_em || undefined,
   motivoCancelamento: r.motivo_cancelamento || undefined,
   numero: r.numero ?? r.numero_pedido ?? null,
+  origem: r.origem || "site",
 });
 
 // ---------- mensagens prontas para o WhatsApp do cliente ----------
@@ -362,7 +371,7 @@ export default function AdminApp() {
   const [funcionarios, setFuncionarios] = useState([]);
   const [bairrosEntrega, setBairrosEntrega] = useState([]);
   const [diarias, setDiarias] = useState([]);
-  const [tab, setTab] = useState("pedidos"); // pedidos | caixa | compras | equipe | relatorios | financeiro | cardapio | contatos | config
+  const [tab, setTab] = useState("pedidos"); // pedidos | balcao | caixa | compras | equipe | relatorios | financeiro | cardapio | contatos | config
   const [toast, setToast] = useState(null);
   const [somAtivo, setSomAtivo] = useState(false);
   const audioCtxRef = useRef(null);
@@ -506,7 +515,10 @@ export default function AdminApp() {
     const canal = supabase
       .channel("pedidos-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "pedidos" }, (payload) => {
-        setPedidos((prev) => [mapPedidoFromDb(payload.new), ...prev]);
+        const novo = mapPedidoFromDb(payload.new);
+        setPedidos((prev) => (prev.some((p) => p.id === novo.id) ? prev : [novo, ...prev]));
+        // pedido lançado no balcão pelo próprio painel: entra na lista sem alerta e sem aceite automático
+        if (novo.origem === "balcao") return;
         tocarAlerta();
         if (aceitarAutomaticoRef.current) {
           showToast("Novo pedido aceito automaticamente!");
@@ -890,7 +902,6 @@ export default function AdminApp() {
 
   useEffect(() => {
     if (tab === "compras") { carregarCaixa(); carregarCompras(); }
-    if (tab === "caixa") carregarCaixa();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -1018,10 +1029,10 @@ export default function AdminApp() {
   };
 
   const lancarMovimento = async (payload) => {
-    if (!caixaAtual) return;
+    // o caixa novo não usa mais "turno": se houver um turno antigo aberto, a compra fica ligada a ele; senão, sem turno
     const { data, error } = await supabase
       .from("movimentacoes_caixa")
-      .insert({ caixa_id: caixaAtual.id, ...payload })
+      .insert({ caixa_id: caixaAtual ? caixaAtual.id : null, ...payload })
       .select()
       .single();
     if (error) { showToast(`Erro ao lançar: ${error.message}`); return null; }
@@ -1211,7 +1222,7 @@ export default function AdminApp() {
   };
 
   const lancarCompra = async () => {
-    if (!caixaAtual || salvandoCompra) return;
+    if (salvandoCompra) return;
 
     const linhas = formCompra.itens.filter((it) => it.produto.trim() || String(it.quantidade).trim());
     if (linhas.length === 0) { showToast("Informe o produto e a quantidade"); return; }
@@ -1234,7 +1245,7 @@ export default function AdminApp() {
       let notaPath = null;
       if (notaArquivo) {
         const ext = ((notaArquivo.name || "").split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
-        const caminho = `${caixaAtual.id}/${uid()}${uid()}.${ext}`;
+        const caminho = `${caixaAtual ? caixaAtual.id : "avulso"}/${uid()}${uid()}.${ext}`;
         const { error: upErr } = await supabase.storage.from(NOTAS_BUCKET).upload(caminho, notaArquivo, { contentType: notaArquivo.type || undefined, upsert: false });
         if (upErr) { showToast(`Erro ao enviar a foto do cupom fiscal: ${upErr.message}`); return; }
         notaPath = caminho;
@@ -1276,27 +1287,6 @@ export default function AdminApp() {
       return;
     }
     setNotaVisualizacao({ carregando: false, url: data.signedUrl, erro: null });
-  };
-
-  const [formFechamentoDia, setFormFechamentoDia] = useState({ dinheiro: "", cartao: "", pix: "", data: dataLocalISO() });
-
-  const lancarFechamentoDia = async () => {
-    const entradas = [
-      { campo: "dinheiro", forma: "Dinheiro", valor: formFechamentoDia.dinheiro },
-      { campo: "cartao", forma: "Cartão", valor: formFechamentoDia.cartao },
-      { campo: "pix", forma: "Pix", valor: formFechamentoDia.pix },
-    ].filter((e) => e.valor && Number(e.valor) > 0);
-    if (entradas.length === 0) return;
-    // data das vendas: só grava data_referencia quando não é hoje (hoje = o próprio dia do lançamento)
-    const dataVendas = formFechamentoDia.data || dataLocalISO();
-    const extra = dataVendas !== dataLocalISO() ? { data_referencia: dataVendas } : {};
-    for (const e of entradas) {
-      const mov = await lancarMovimento({ tipo: "venda", valor: Number(e.valor), forma_pagamento: e.forma, descricao: "Total do dia", ...extra });
-      if (!mov) return; // deu erro: mantém o que falta no formulário (o que já foi lançado é limpo, para não duplicar ao tentar de novo)
-      setFormFechamentoDia((f) => ({ ...f, [e.campo]: "" }));
-    }
-    setFormFechamentoDia({ dinheiro: "", cartao: "", pix: "", data: dataLocalISO() });
-    showToast("Vendas do dia lançadas");
   };
 
   const totaisCaixa = useMemo(() => {
@@ -1944,164 +1934,46 @@ export default function AdminApp() {
           </>
         )}
 
+        {tab === "balcao" && (
+          <BalcaoTela
+            supabase={supabase}
+            C={C}
+            fmt={fmt}
+            Card={Card}
+            FieldLabel={FieldLabel}
+            EmptyState={EmptyState}
+            inputStyle={inputStyle}
+            btnPrimary={btnPrimary}
+            btnOutline={btnOutline}
+            iconBtnStyle={iconBtnStyle}
+            showToast={showToast}
+            dataLocalISO={dataLocalISO}
+            cardapio={cardapio}
+            pedidos={pedidos}
+            codigoPedido={codigoPedido}
+            labelStatus={LABEL_STATUS}
+            atualizarStatusPedido={atualizarStatusPedido}
+            onPedidoCriado={(row) =>
+              setPedidos((prev) => (prev.some((p) => p.id === row.id) ? prev : [mapPedidoFromDb(row), ...prev]))
+            }
+          />
+        )}
+
         {tab === "caixa" && (
-          <>
-            {carregandoCaixa ? (
-              <div style={{ textAlign: "center", padding: "40px 0", color: C.textSoft }}>
-                <Loader2 size={20} className="spin" />
-              </div>
-            ) : !caixaAtual ? (
-              <>
-              <Card>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                  <Lock size={18} color={C.orange} />
-                  <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Caixa fechado</div>
-                </div>
-                <div style={{ fontSize: 12.5, color: C.textSoft, marginBottom: 12 }}>
-                  Informe o valor inicial (fundo de troco) para abrir o caixa e começar a lançar vendas de balcão.
-                </div>
-                <input
-                  type="number"
-                  placeholder="Valor de abertura (R$)"
-                  value={valorAberturaForm}
-                  onChange={(e) => setValorAberturaForm(e.target.value)}
-                  style={{ ...inputStyle, fontSize: 18, fontWeight: 700, padding: "13px 12px", marginBottom: 12 }}
-                />
-                <button onClick={abrirCaixa} style={{ ...btnPrimary, width: "100%" }}>
-                  <Wallet size={16} /> Abrir caixa
-                </button>
-              </Card>
-              </>
-            ) : (
-              <>
-                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                  <MiniStat label="Vendas no turno" value={fmt(totaisCaixa.totalVendas)} />
-                  <MiniStat label="Compras no turno" value={fmt(totaisCaixa.totalCompras)} />
-                  <MiniStat label="Saldo em dinheiro" value={fmt(totaisCaixa.saldoDinheiro)} />
-                </div>
-
-                <Card style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Lançar vendas do dia</div>
-                  <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 10 }}>
-                    Se você prefere lançar o total vendido no fim do dia (em vez de venda por venda), preencha por forma de pagamento.
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
-                    <div>
-                      <FieldLabel>Data das vendas</FieldLabel>
-                      <input type="date" value={formFechamentoDia.data} max={dataLocalISO()} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, data: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <FieldLabel>Dinheiro</FieldLabel>
-                      <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.dinheiro} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, dinheiro: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <FieldLabel>Cartão</FieldLabel>
-                      <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.cartao} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, cartao: e.target.value }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <FieldLabel>Pix</FieldLabel>
-                      <input type="number" placeholder="R$ 0,00" value={formFechamentoDia.pix} onChange={(e) => setFormFechamentoDia((f) => ({ ...f, pix: e.target.value }))} style={inputStyle} />
-                    </div>
-                  </div>
-                  <button onClick={lancarFechamentoDia} style={{ ...btnPrimary, width: "100%" }}>
-                    <Check size={15} /> Lançar vendas do dia
-                  </button>
-                </Card>
-
-                <Card style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Suprimento (adicionar dinheiro ao caixa)</div>
-                  <input
-                    type="number"
-                    placeholder="Valor (R$)"
-                    value={formMovimento.valor}
-                    onChange={(e) => setFormMovimento((f) => ({ ...f, valor: e.target.value }))}
-                    style={{ ...inputStyle, marginBottom: 8 }}
-                  />
-                  <input
-                    placeholder="Motivo (opcional)"
-                    value={formMovimento.descricao}
-                    onChange={(e) => setFormMovimento((f) => ({ ...f, descricao: e.target.value }))}
-                    style={{ ...inputStyle, marginBottom: 10 }}
-                  />
-                  <button onClick={lancarMovimentoExtra} style={{ ...btnOutline, width: "100%", borderColor: C.green, color: C.green }}>
-                    <ArrowDownCircle size={15} /> Registrar suprimento
-                  </button>
-                </Card>
-
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Movimentações do turno</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                  {movimentacoes.length === 0 && <EmptyState text="Nenhuma movimentação ainda." />}
-                  {movimentacoes.map((m) => (
-                    <div key={m.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
-                          {m.tipo === "venda" ? `Venda${m.formaPagamento ? " · " + m.formaPagamento : ""}` : m.tipo === "sangria" ? "Sangria" : m.tipo === "compra" ? "Compra" : "Suprimento"}
-                        </div>
-                        {m.tipo === "compra"
-                          ? renderDetalhesCompra(m)
-                          : m.descricao && <div style={{ fontSize: 11.5, color: C.textSoft }}>{m.descricao}</div>}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: m.tipo === "sangria" || m.tipo === "compra" ? C.red : C.green }}>
-                          {m.tipo === "sangria" || m.tipo === "compra" ? "−" : "+"} {fmt(m.valor)}
-                        </span>
-                        <button onClick={() => removerMovimento(m.id)} style={iconBtnStyle} aria-label="Excluir movimentação"><Trash2 size={14} color={C.textFaint} /></button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <Card style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Fechar caixa</div>
-                  {!confirmarFechamento ? (
-                    <button onClick={() => setConfirmarFechamento(true)} style={{ ...btnOutline, width: "100%" }}>
-                      <Lock size={15} /> Fechar caixa
-                    </button>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 12.5, color: C.textSoft, marginBottom: 10 }}>
-                        Saldo esperado em dinheiro: <b style={{ color: C.text }}>{fmt(totaisCaixa.saldoDinheiro)}</b>. Conte o dinheiro físico e informe abaixo.
-                      </div>
-                      <input
-                        type="number"
-                        placeholder="Valor contado (R$)"
-                        value={valorFechamentoForm}
-                        onChange={(e) => setValorFechamentoForm(e.target.value)}
-                        style={{ ...inputStyle, fontSize: 18, fontWeight: 700, padding: "12px", marginBottom: 10 }}
-                      />
-                      {valorFechamentoForm && (
-                        <div style={{ fontSize: 12.5, marginBottom: 10, color: Number(valorFechamentoForm) === totaisCaixa.saldoDinheiro ? C.green : C.red }}>
-                          Diferença: {fmt(Number(valorFechamentoForm) - totaisCaixa.saldoDinheiro)}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => setConfirmarFechamento(false)} style={{ ...btnOutline, flex: 1 }}>Cancelar</button>
-                        <button onClick={fecharCaixa} style={{ ...btnPrimary, flex: 1, background: C.red, color: "#fff" }}>Confirmar fechamento</button>
-                      </div>
-                    </>
-                  )}
-                </Card>
-
-                {historicoCaixas.length > 0 && (
-                  <>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Turnos anteriores</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {historicoCaixas.map((c) => (
-                        <div key={c.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 10 }}>
-                          <div style={{ fontSize: 12.5, color: C.textSoft }}>
-                            {new Date(c.abertoEm).toLocaleDateString("pt-BR")} · {new Date(c.abertoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} – {c.fechadoEm ? new Date(c.fechadoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : ""}
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
-                            <span style={{ color: C.textSoft }}>Abertura {fmt(c.valorAbertura)} → Fechamento {fmt(c.valorFechamentoInformado || 0)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </>
+          <Caixa
+            supabase={supabase}
+            C={C}
+            fmt={fmt}
+            Card={Card}
+            FieldLabel={FieldLabel}
+            EmptyState={EmptyState}
+            inputStyle={inputStyle}
+            btnPrimary={btnPrimary}
+            btnOutline={btnOutline}
+            iconBtnStyle={iconBtnStyle}
+            showToast={showToast}
+            dataLocalISO={dataLocalISO}
+          />
         )}
 
         {tab === "compras" && (
@@ -2157,13 +2029,7 @@ export default function AdminApp() {
               )}
             </Card>
 
-            {!caixaAtual && !carregandoCaixa && (
-              <Card style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Lançar compra</div>
-                <div style={{ fontSize: 12.5, color: C.textSoft }}>Para lançar uma compra nova, abra o caixa primeiro (a compra sai do caixa do turno). A consulta de preços acima funciona sempre.</div>
-              </Card>
-            )}
-            {caixaAtual && (
+            {!carregandoCaixa && (
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Compras</div>
 
@@ -2948,6 +2814,7 @@ export default function AdminApp() {
         <div style={{ maxWidth: 640, margin: "0 auto", display: "flex" }}>
           {[
             { id: "pedidos", label: "Pedidos", icon: ClipboardList, badge: pedidosPendentes.length },
+            { id: "balcao", label: "Balcão", icon: Store },
             { id: "caixa", label: "Caixa", icon: Wallet },
             { id: "compras", label: "Compras", icon: Package },
             { id: "equipe", label: "Equipe", icon: Users },
