@@ -367,3 +367,16 @@ O botão **Novo pedido (F2)** abre uma janela parecida com a do Consumer:
 O detalhe do pedido mostra a trilha de etapas: **Novo, Aceito, Produção / Cozinha, Pronto / Retirar (ou Saiu para entrega), Finalizado**. Elas usam os status que o sistema já tem: `pendente`, `aceito`, `preparando`, `pronto` e `concluido`. Em pedido de entrega, `pronto` significa "Saiu para entrega".
 
 Pedidos de entrega têm campo **Entregador** (nome digitado ou escolhido da equipe), gravado em `pedidos.entregador`. Rode de novo `supabase/migracao-balcao-reservas.sql` para criar essa coluna (pode rodar mais de uma vez).
+
+#### Ajustes da versão Consumer (rodada mais recente)
+
+- **Reservas:** o botão "Nova reserva" e as reservas foram retiradas da versão Consumer. A versão `"simples"` e a tabela `reservas` continuam no código.
+- **Retirar no local:** situação do pedido só com **Aguardando retirada** (status `pronto`) ou **Finalizado** (`concluido`). Telefone opcional (se preencher, precisa ter DDD + número).
+- **Entrega:** o pedido entra como **Em preparo** (`preparando`); depois **Saiu para entrega** (`pronto`) e **Finalizado** (`concluido`).
+- **CEP:** preenche rua e bairro e calcula a taxa pelo bairro cadastrado em `bairros_entrega` (nome igual ou parecido). Se o bairro não estiver cadastrado, usa a taxa padrão e avisa na tela. A taxa continua editável.
+- **Erros:** ao lançar ou salvar, a janela mostra em vermelho o que faltou ou o motivo do erro do banco (campo obrigatório, coluna que falta, sem permissão, valor recusado, sem internet).
+- **Editar pedido:** botão no detalhe (itens, cliente, endereço, taxa, pagamento, observação, entregador).
+- **Comanda:** botão **Imprimir comanda** no detalhe e opção "Imprimir comanda ao lançar", usando a impressão que já existia na aba Pedidos (com forma de pagamento e troco).
+- **Pedido do site:** ao tocar em **Aceitar** na aba Pedidos, o painel abre a aba Balcão no dia do pedido e destaca a linha por alguns segundos.
+- **Detalhe:** o botão **Cancelar pedido** (ou **Recusar**, se o pedido ainda é novo) ficou separado, no rodapé, e no lugar dele há o botão **Voltar**.
+- Rode de novo `supabase/migracao-balcao-reservas.sql` para criar a coluna `entregador`.

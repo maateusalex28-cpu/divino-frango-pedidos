@@ -635,7 +635,16 @@ export default function AdminApp() {
     showToast(mensagem || `Pedido: ${LABEL_STATUS[status] || status}`);
     return true;
   };
-  const aceitarPedido = (id) => atualizarStatusPedido(id, "aceito");
+  // pedido do site aceito: vai direto para a aba Balcão, destacado, para acompanhar por lá
+  const [destaqueBalcao, setDestaqueBalcao] = useState(null);
+  const aceitarPedido = async (id) => {
+    const ok = await atualizarStatusPedido(id, "aceito");
+    if (ok) {
+      setDestaqueBalcao(id);
+      setTab("balcao");
+      setTimeout(() => setDestaqueBalcao((atual) => (atual === id ? null : atual)), 10000);
+    }
+  };
   const recusarPedido = (id) => atualizarStatusPedido(id, "recusado");
   const iniciarPreparoPedido = (id) => atualizarStatusPedido(id, "preparando");
   // "Saiu para entrega" (ou "Pronto para retirada"): grava o horário em pronto_em.
@@ -724,7 +733,7 @@ export default function AdminApp() {
         <div style="text-align:center;font-size:12px;">${new Date(pedido.createdAt).toLocaleString("pt-BR")}</div>
         <div class="linha"></div>
         <div><b>Cliente:</b> ${pedido.clienteNome}</div>
-        <div><b>Telefone:</b> ${pedido.clienteTelefone}</div>
+        ${pedido.clienteTelefone ? `<div><b>Telefone:</b> ${pedido.clienteTelefone}</div>` : ""}
         <div><b>Tipo:</b> ${pedido.tipoEntrega === "entrega" ? "Entrega" : "Retirada"}</div>
         ${pedido.tipoEntrega === "entrega" ? `<div><b>Endereço:</b> ${pedido.endereco || ""}${pedido.bairro ? " - " + pedido.bairro : ""}</div>` : ""}
         ${pedido.referencia ? `<div><b>Referência:</b> ${pedido.referencia}</div>` : ""}
@@ -1961,9 +1970,19 @@ export default function AdminApp() {
               setPedidos((prev) => prev.map((p) => (p.id === row.id ? mapPedidoFromDb(row) : p)))
             }
             taxaPadrao={Number(taxaEntregaForm) || 0}
-            onPedidoCriado={(row) =>
-              setPedidos((prev) => (prev.some((p) => p.id === row.id) ? prev : [mapPedidoFromDb(row), ...prev]))
-            }
+            onPedidoCriado={(row) => {
+              const mapeado = mapPedidoFromDb(row);
+              setPedidos((prev) => (prev.some((p) => p.id === mapeado.id) ? prev : [mapeado, ...prev]));
+              return mapeado;
+            }}
+            imprimirPedido={imprimirPedido}
+            abrirWhatsAppPedido={(p, tipoAviso) => {
+              const tempo = mostrarTempoEntrega && Number(tempoEntregaMin) > 0
+                ? (tempoEntregaMin === tempoEntregaMax ? `${tempoEntregaMin} min` : `${tempoEntregaMin} a ${tempoEntregaMax} min`)
+                : null;
+              window.open(linkWhatsAppCliente(p, tipoAviso, tempo), "_blank", "noopener");
+            }}
+            destaqueId={destaqueBalcao}
           />
         )}
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Plus, Minus, Trash2, Check, X, Search, Phone, Loader2, RefreshCw, CalendarPlus, Flag } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, Minus, Check, X, Search, Phone, Loader2, Flag, Printer, Pencil, ChevronLeft } from "lucide-react";
 
 const FORMAS = ["Dinheiro", "Pix", "Cartão"];
 
@@ -11,8 +11,8 @@ const paraNumero = (v) => {
 };
 const arred = (n) => Math.round(n * 100) / 100;
 const semAcento = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-const agoraISO = () => new Date().toISOString();
 const soDigitos = (v) => String(v || "").replace(/\D/g, "");
+const agoraISO = () => new Date().toISOString();
 
 const fmtAbertura = (iso) => {
   if (!iso) return "";
@@ -25,15 +25,44 @@ const fmtDuracao = (ms) => {
   if (min < 60) return `${min}min`;
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}`;
 };
-const linkWhatsApp = (tel, texto) => {
-  const d = String(tel || "").replace(/\D/g, "");
-  if (d.length < 10) return null;
-  return `https://wa.me/${d.startsWith("55") ? d : "55" + d}?text=${encodeURIComponent(texto)}`;
-};
 
 const grupoPedido = (s) => (s === "concluido" ? "finalizado" : s === "cancelado" || s === "recusado" ? "cancelado" : "andamento");
-const grupoReserva = (s) => (s === "retirada" ? "finalizado" : s === "cancelada" ? "cancelado" : "andamento");
-const LABEL_RESERVA = { pendente: "Pendente", confirmada: "Confirmada", retirada: "Retirada", cancelada: "Cancelada" };
+
+const rotuloPedido = (p) => {
+  if (p.status === "pronto") return p.tipoEntrega === "entrega" ? "Saiu para entrega" : "Aguardando retirada";
+  return { pendente: "Novo", aceito: "Aceito", preparando: "Em preparo", concluido: "Finalizado", cancelado: "Cancelado", recusado: "Recusado" }[p.status] || p.status;
+};
+
+// etapas mostradas no detalhe: pedido do site passa por Novo e Aceito; pedido do balcão já nasce em andamento
+const etapasDoPedido = (p) => {
+  const entrega = p.tipoEntrega === "entrega";
+  const ultima = ["pronto", entrega ? "Saiu para entrega" : "Aguardando retirada"];
+  const fim = ["concluido", "Finalizado"];
+  if ((p.origem || "site") === "balcao") return entrega ? [["preparando", "Em preparo"], ultima, fim] : [ultima, fim];
+  return [["pendente", "Novo"], ["aceito", "Aceito"], ["preparando", "Em preparo"], ultima, fim];
+};
+
+// traduz o erro do banco em uma frase que diz o motivo
+const descreverErroBanco = (error) => {
+  const msg = (error && error.message) || "erro desconhecido";
+  const det = [error && error.details, error && error.hint].filter(Boolean).join(" ");
+  const cod = error && error.code ? ` (código ${error.code})` : "";
+  if (error && error.code === "23502") {
+    const col = (msg.match(/column "([^"]+)"/) || [])[1];
+    return `O banco exige o campo "${col || "?"}", que não foi preenchido${cod}.`;
+  }
+  if ((error && (error.code === "PGRST204" || error.code === "42703")) || /schema cache|does not exist/i.test(msg)) {
+    const col = (msg.match(/'([^']+)' column/) || msg.match(/column "?([a-z_]+)"?/i) || [])[1];
+    return `O banco ainda não tem a coluna "${col || "?"}". Rode o arquivo supabase/migracao-balcao-reservas.sql no Supabase${cod}.`;
+  }
+  if ((error && error.code === "42501") || /row-level security|permission denied/i.test(msg)) {
+    return `Sem permissão para gravar. Saia e entre de novo no painel${cod}.`;
+  }
+  if (error && error.code === "23514") return `O banco não aceitou um dos valores (regra de validação): ${det || msg}${cod}`;
+  if (error && error.code === "P0001") return `O sistema recusou o pedido: ${msg}`;
+  if (/failed to fetch|networkerror|network request/i.test(msg)) return "Sem conexão com a internet ou com o Supabase. Tente de novo.";
+  return `${msg}${det ? ` — ${det}` : ""}${cod}`;
+};
 
 // Modal no nível do módulo, para os campos não perderem o foco a cada letra digitada
 function Modal({ C, titulo, onClose, largura = 640, children }) {
@@ -60,16 +89,16 @@ function Modal({ C, titulo, onClose, largura = 640, children }) {
 
 export default function BalcaoConsumer({
   supabase, C, fmt, FieldLabel, EmptyState, inputStyle, btnPrimary, btnOutline, iconBtnStyle,
-  showToast, dataLocalISO, cardapio, pedidos, codigoPedido, labelStatus, onPedidoCriado, atualizarStatusPedido,
-  bairrosEntrega, taxaPadrao, funcionarios, rotuloStatus, onPedidoAtualizado,
+  showToast, dataLocalISO, cardapio, pedidos, codigoPedido, onPedidoCriado, onPedidoAtualizado, atualizarStatusPedido,
+  bairrosEntrega, taxaPadrao, funcionarios, imprimirPedido, abrirWhatsAppPedido, destaqueId,
 }) {
   const hoje = dataLocalISO();
   const [dia, setDia] = useState(hoje);
   const [pesquisa, setPesquisa] = useState("");
-  const [filtroOrigem, setFiltroOrigem] = useState("todos"); // todos | site | balcao | reserva
+  const [filtroOrigem, setFiltroOrigem] = useState("todos"); // todos | site | balcao
   const [filtroStatus, setFiltroStatus] = useState("todos"); // todos | andamento | finalizado | cancelado
   const [agora, setAgora] = useState(Date.now());
-  const [modal, setModal] = useState(null); // "pedido" | "reserva" | null
+  const [modal, setModal] = useState(null); // "pedido" | null
   const [detalheKey, setDetalheKey] = useState(null);
 
   useEffect(() => {
@@ -85,63 +114,52 @@ export default function BalcaoConsumer({
   const corStatus = (g) =>
     g === "finalizado" ? { bg: C.greenSoft, fg: C.green } : g === "cancelado" ? { bg: C.redSoft, fg: C.red } : { bg: C.orangeSoft, fg: C.orangeText };
 
-  // ---------------- Reservas (carga) ----------------
-  const [reservas, setReservas] = useState([]);
-  const [erroRes, setErroRes] = useState("");
-  const [carregando, setCarregando] = useState(false);
-
-  const carregarReservas = useCallback(async () => {
-    setCarregando(true);
-    const { data, error } = await supabase.from("reservas").select("*").order("data_retirada", { ascending: true });
-    setCarregando(false);
-    if (error) {
-      console.error(error);
-      setErroRes("Reservas indisponíveis: rode migracao-balcao-reservas.sql no Supabase.");
-      return;
-    }
-    setErroRes("");
-    setReservas(data || []);
-  }, [supabase]);
-
-  useEffect(() => { carregarReservas(); }, [carregarReservas]);
-
-  // ---------------- Linhas da tabela (pedidos + reservas) ----------------
+  // ---------------- Linhas da tabela ----------------
   const linhas = useMemo(() => {
     const doDia = (pedidos || []).filter((p) => (p.dataPedido || (p.createdAt ? dataLocalISO(new Date(p.createdAt)) : "")) === dia);
-    const ps = doDia.map((p) => {
+    const lista = doDia.map((p) => {
       const grupo = grupoPedido(p.status);
       const fim = p.concluidoEm || p.canceladoEm || null;
+      const diaAbertura = p.createdAt ? dataLocalISO(new Date(p.createdAt)) : "";
       return {
-        key: `p${p.id}`, tipo: "pedido", ref: p, cod: codigoPedido(p), abertura: p.createdAt,
+        key: `p${p.id}`, ref: p, cod: codigoPedido(p), abertura: p.createdAt,
         duracao: grupo === "andamento" ? agora - new Date(p.createdAt).getTime() : fim ? new Date(fim).getTime() - new Date(p.createdAt).getTime() : null,
         andamento: grupo === "andamento",
-        cliente: p.clienteNome, origem: p.origem || "site", grupo,
-        statusTxt: (rotuloStatus && rotuloStatus(p)) || (labelStatus && labelStatus[p.status]) || p.status,
+        cliente: p.clienteNome, origem: p.origem || "site", grupo, statusTxt: rotuloPedido(p),
         ehEntrega: p.tipoEntrega === "entrega", entregador: p.entregador || "",
         entrega: p.tipoEntrega === "entrega" ? "Entregar no endereço" : "Retirar no local",
         entregaSub: p.tipoEntrega === "entrega" ? [p.endereco, p.bairro].filter(Boolean).join(" - ") : "",
-        pagamento: p.formaPagamento || "", total: p.total || 0, agendado: "",
+        pagamento: p.formaPagamento || "", total: p.total || 0,
+        agendado: p.dataPedido && diaAbertura && p.dataPedido !== diaAbertura ? new Date(p.dataPedido + "T00:00").toLocaleDateString("pt-BR") : "",
       };
     });
-    const rs = reservas.filter((r) => r.data_retirada === dia).map((r) => ({
-      key: `r${r.id}`, tipo: "reserva", ref: r, cod: `R${String(r.id).slice(0, 3).toUpperCase()}`, abertura: r.created_at,
-      duracao: null, andamento: false, cliente: r.cliente_nome, origem: "reserva", grupo: grupoReserva(r.status),
-      statusTxt: LABEL_RESERVA[r.status] || r.status, entrega: "Retirar no local", entregaSub: r.descricao,
-      pagamento: "", total: r.total || 0, agendado: r.hora_retirada || "Sem hora", ehEntrega: false, entregador: "",
-    }));
     const termo = semAcento(pesquisa);
-    return [...ps, ...rs]
+    return lista
       .filter((l) => filtroOrigem === "todos" || l.origem === filtroOrigem)
       .filter((l) => filtroStatus === "todos" || l.grupo === filtroStatus)
       .filter((l) => !termo || semAcento(`${l.cod} ${l.cliente} ${l.entregaSub}`).includes(termo))
       .sort((a, b) => String(b.abertura).localeCompare(String(a.abertura)));
-  }, [pedidos, reservas, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO, labelStatus, rotuloStatus]);
+  }, [pedidos, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO]);
 
   const validos = linhas.filter((l) => l.grupo !== "cancelado");
   const somaTotal = arred(validos.reduce((s, l) => s + l.total, 0));
-  const detalhe = linhas.find((l) => l.key === detalheKey) || null;
+  const pedidoDet = (pedidos || []).find((x) => `p${x.id}` === detalheKey) || null;
 
-  // ---------------- Novo pedido (retirar no balcão ou entrega) ----------------
+  // pedido aceito na aba Pedidos: abre aqui no dia dele e fica destacado
+  useEffect(() => {
+    if (!destaqueId) return;
+    const ped = (pedidos || []).find((x) => x.id === destaqueId);
+    if (!ped) return;
+    setDia(ped.dataPedido || (ped.createdAt ? dataLocalISO(new Date(ped.createdAt)) : hoje));
+    setFiltroOrigem("todos");
+    setFiltroStatus("todos");
+    setPesquisa("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destaqueId]);
+
+  // ---------------- Formulário do pedido (novo ou edição) ----------------
+  const [editandoId, setEditandoId] = useState(null);
+  const [erroPedido, setErroPedido] = useState("");
   const [carrinho, setCarrinho] = useState([]);
   const [busca, setBusca] = useState("");
   const [tipo, setTipo] = useState("retirada"); // retirada | entrega
@@ -159,7 +177,8 @@ export default function BalcaoConsumer({
   const [forma, setForma] = useState("Dinheiro");
   const [trocoPara, setTrocoPara] = useState("");
   const [obs, setObs] = useState("");
-  const [entregueNaHora, setEntregueNaHora] = useState(true);
+  const [statusRetirada, setStatusRetirada] = useState("aguardando"); // aguardando | finalizado
+  const [imprimirAoLancar, setImprimirAoLancar] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [contatos, setContatos] = useState([]);
   const [mostrarSug, setMostrarSug] = useState(false);
@@ -175,7 +194,7 @@ export default function BalcaoConsumer({
   // ao abrir um pedido, carrega o entregador atual no campo
   useEffect(() => {
     const ped = (pedidos || []).find((x) => `p${x.id}` === detalheKey);
-    setEntregadorTxt(ped?.entregador || "");
+    setEntregadorTxt((ped && ped.entregador) || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detalheKey]);
 
@@ -242,7 +261,7 @@ export default function BalcaoConsumer({
       } else {
         setRua(d.logradouro || "");
         setBairro(d.bairro || "");
-        setTaxaManual(false);
+        setTaxaManual(false); // a taxa é recalculada pelo bairro
       }
     } catch (e) {
       showToast("Não foi possível buscar o CEP");
@@ -256,11 +275,18 @@ export default function BalcaoConsumer({
     if (d.length === 8) buscarCep(d);
   };
 
-  // taxa: a do bairro cadastrado; se não houver, a taxa padrão. Dá para editar na mão.
-  const taxaSugerida = useMemo(() => {
-    const b = (bairrosEntrega || []).find((x) => x.ativo !== false && semAcento(x.nome) === semAcento(bairro));
-    return b ? Number(b.taxa) || 0 : Number(taxaPadrao) || 0;
-  }, [bairrosEntrega, bairro, taxaPadrao]);
+  // taxa pelo bairro cadastrado (nome igual ou parecido); se não houver, usa a taxa padrão. Dá para editar na mão.
+  const bairroCadastrado = useMemo(() => {
+    const alvo = semAcento(bairro).trim();
+    if (!alvo) return null;
+    const lista = (bairrosEntrega || []).filter((x) => x.ativo !== false);
+    return (
+      lista.find((x) => semAcento(x.nome).trim() === alvo) ||
+      lista.find((x) => { const n = semAcento(x.nome).trim(); return n && (n.includes(alvo) || alvo.includes(n)); }) ||
+      null
+    );
+  }, [bairrosEntrega, bairro]);
+  const taxaSugerida = bairroCadastrado ? Number(bairroCadastrado.taxa) || 0 : Number(taxaPadrao) || 0;
   const taxa = tipo === "entrega" ? (taxaManual ? paraNumero(taxaTxt) : taxaSugerida) : 0;
 
   const itensVisiveis = useMemo(
@@ -279,126 +305,127 @@ export default function BalcaoConsumer({
   const mudarQtd = (id, delta) =>
     setCarrinho((prev) => prev.map((x) => (x.id === id ? { ...x, qtd: x.qtd + delta } : x)).filter((x) => x.qtd > 0));
 
-  const abrirPedido = () => { setBusca(""); setModal("pedido"); };
+  const limparPedido = () => {
+    setEditandoId(null); setErroPedido(""); setBusca("");
+    setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
+    setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
+    setForma("Dinheiro"); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo("");
+  };
+  const abrirNovo = () => { limparPedido(); setModal("pedido"); };
+
+  const abrirEdicao = (p) => {
+    limparPedido();
+    setEditandoId(p.id);
+    setTipo(p.tipoEntrega === "entrega" ? "entrega" : "retirada");
+    setNome(p.clienteNome === "Balcão" ? "" : p.clienteNome || "");
+    setTelefone(p.clienteTelefone || "");
+    setCep(p.cep || ""); setRua(p.endereco || ""); setBairro(p.bairro || ""); setReferencia(p.referencia || "");
+    setTaxaManual(true); setTaxaTxt(String(p.taxaEntrega || 0).replace(".", ","));
+    setForma(p.formaPagamento || "Dinheiro");
+    setTrocoPara(p.precisaTroco && p.trocoPara != null ? String(p.trocoPara).replace(".", ",") : "");
+    setObs(p.observacao || "");
+    setEntregadorNovo(p.entregador || "");
+    setCarrinho((p.itens || []).map((it, i) => ({
+      id: it.id != null ? it.id : `sem-id-${i}`, semId: it.id == null,
+      nome: it.nome, preco: Number(it.preco) || 0, qtd: Number(it.qtd) || 1,
+    })));
+    setModal("pedido");
+  };
 
   useEffect(() => {
     const h = (e) => {
-      if (e.key === "F2") { e.preventDefault(); setBusca(""); setModal("pedido"); }
-      if (e.key === "Escape") setModal(null);
+      if (e.key === "F2") { e.preventDefault(); abrirNovo(); }
+      if (e.key === "Escape") { if (modal) setModal(null); else setDetalheKey(null); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal]);
 
-  const limparPedido = () => {
-    setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
-    setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
-    setForma("Dinheiro"); setTipo("retirada"); setEntregueNaHora(true); setEntregadorNovo("");
+  const validarPedido = () => {
+    const falta = [];
+    if (!carrinho.length) falta.push("Adicione pelo menos um item ao pedido.");
+    if (tipo === "entrega") {
+      if (!nome.trim()) falta.push("Informe o nome do cliente.");
+      if (!rua.trim()) falta.push("Informe o endereço de entrega (rua).");
+      if (!bairro.trim()) falta.push("Informe o bairro (ele define a taxa de entrega).");
+    }
+    if (cep && soDigitos(cep).length !== 8) falta.push("CEP incompleto: são 8 números.");
+    if (telefone.trim() && soDigitos(telefone).length < 10) falta.push("Telefone incompleto: use DDD + número, ou deixe em branco.");
+    if (taxaManual && tipo === "entrega" && taxaTxt.trim() && paraNumero(taxaTxt) < 0) falta.push("A taxa de entrega não pode ser negativa.");
+    if (forma === "Dinheiro" && paraNumero(trocoPara) > 0 && paraNumero(trocoPara) < totalPedido) {
+      falta.push(`O troco é para ${fmt(paraNumero(trocoPara))}, menos que o total de ${fmt(totalPedido)}.`);
+    }
+    return falta;
   };
 
   const lancarPedido = async () => {
-    if (!carrinho.length) return showToast("Adicione pelo menos um item");
-    if (tipo === "entrega") {
-      if (!nome.trim()) return showToast("Informe o nome do cliente");
-      if (!rua.trim()) return showToast("Informe o endereço de entrega");
+    const falta = validarPedido();
+    if (falta.length) {
+      setErroPedido(`Não foi possível ${editandoId ? "salvar" : "lançar"} o pedido:\n• ${falta.join("\n• ")}`);
+      return;
     }
+    setErroPedido("");
     setSalvando(true);
+
+    const original = editandoId ? (pedidos || []).find((x) => x.id === editandoId) : null;
     const enderecoCompleto = `${[rua.trim(), numeroEnd.trim()].filter(Boolean).join(", ")}${compl.trim() ? ` - ${compl.trim()}` : ""}`;
     const valorTroco = paraNumero(trocoPara);
     const comTroco = forma === "Dinheiro" && valorTroco > 0;
-    const concluir = tipo === "retirada" && entregueNaHora;
-    const linha = {
+    const campos = {
       cliente_nome: nome.trim() || "Balcão",
       cliente_telefone: telefone.trim(),
       tipo_entrega: tipo,
       forma_pagamento: forma,
       precisa_troco: comTroco,
       troco_para: comTroco ? valorTroco : null,
-      itens: carrinho.map(({ id, nome: n, qtd, preco }) => ({ id, nome: n, qtd, preco })),
+      itens: carrinho.map((x) => ({ ...(x.semId ? {} : { id: x.id }), nome: x.nome, qtd: x.qtd, preco: x.preco })),
       subtotal: subtotalCarrinho,
       taxa_entrega: arred(taxa),
       total: totalPedido,
       observacao: obs.trim() || null,
-      status: concluir ? "concluido" : "aceito",
-      origem: "balcao",
-      data_pedido: hoje,
-      ...(concluir ? { concluido_em: agoraISO() } : {}),
-      ...(tipo === "entrega"
-        ? { cep: cep || null, endereco: enderecoCompleto, bairro: bairro.trim() || null, referencia: referencia.trim() || null, ...(entregadorNovo.trim() ? { entregador: entregadorNovo.trim() } : {}) }
-        : {}),
     };
-    const { data, error } = await supabase.from("pedidos").insert(linha).select().single();
+    if (tipo === "entrega") {
+      Object.assign(campos, { cep: cep || null, endereco: enderecoCompleto, bairro: bairro.trim() || null, referencia: referencia.trim() || null });
+      if (entregadorNovo.trim()) campos.entregador = entregadorNovo.trim();
+      else if (original && original.entregador) campos.entregador = null;
+    } else if (original) {
+      Object.assign(campos, { cep: null, endereco: null, bairro: null, referencia: null });
+    }
+
+    let resposta;
+    if (editandoId) {
+      resposta = await supabase.from("pedidos").update(campos).eq("id", editandoId).select().single();
+    } else {
+      const agoraTxt = agoraISO();
+      let extras;
+      if (tipo === "entrega") extras = { status: "preparando" }; // entra em preparo; depois "Saiu para entrega" e "Finalizado"
+      else if (statusRetirada === "finalizado") extras = { status: "concluido", concluido_em: agoraTxt };
+      else extras = { status: "pronto", pronto_em: agoraTxt }; // aguardando retirada
+      resposta = await supabase.from("pedidos").insert({ ...campos, ...extras, origem: "balcao", data_pedido: hoje }).select().single();
+    }
     setSalvando(false);
+    const { data, error } = resposta;
     if (error) {
       console.error(error);
-      if (/origem|entregador/i.test(error.message || "")) showToast("Falta rodar migracao-balcao-reservas.sql no Supabase");
-      else showToast(`Erro ao lançar pedido: ${error.message}`);
+      setErroPedido(`Não foi possível ${editandoId ? "salvar" : "lançar"} o pedido:\n• ${descreverErroBanco(error)}`);
       return;
     }
-    if (onPedidoCriado) onPedidoCriado(data);
-    showToast(`Pedido #${data.numero ?? data.numero_pedido ?? String(data.id).slice(0, 4).toUpperCase()} lançado`);
+
+    if (editandoId) {
+      if (onPedidoAtualizado) onPedidoAtualizado(data);
+      showToast("Pedido atualizado");
+    } else {
+      const mapeado = onPedidoCriado ? onPedidoCriado(data) : null;
+      showToast(`Pedido #${data.numero ?? data.numero_pedido ?? String(data.id).slice(0, 4).toUpperCase()} lançado`);
+      if (imprimirAoLancar && mapeado && imprimirPedido) imprimirPedido(mapeado);
+      setDia(hoje);
+    }
     limparPedido();
-    setDia(hoje);
     setModal(null);
   };
 
-  // ---------------- Nova reserva ----------------
-  const formVazio = { nome: "", tel: "", data: hoje, hora: "", descricao: "", valor: "", sinal: "", obs: "" };
-  const [formRes, setFormRes] = useState(formVazio);
-  const [salvandoRes, setSalvandoRes] = useState(false);
-
-  const salvarReserva = async () => {
-    if (!formRes.nome.trim()) return showToast("Informe o nome do cliente");
-    if (!formRes.data) return showToast("Informe a data da retirada");
-    if (!formRes.descricao.trim()) return showToast("Descreva o que foi encomendado");
-    setSalvandoRes(true);
-    const { data, error } = await supabase.from("reservas").insert({
-      cliente_nome: formRes.nome.trim(),
-      cliente_telefone: formRes.tel.trim() || null,
-      data_retirada: formRes.data,
-      hora_retirada: formRes.hora || null,
-      descricao: formRes.descricao.trim(),
-      total: arred(paraNumero(formRes.valor)),
-      sinal_pago: arred(paraNumero(formRes.sinal)),
-      observacao: formRes.obs.trim() || null,
-      status: "pendente",
-    }).select().single();
-    setSalvandoRes(false);
-    if (error) {
-      console.error(error);
-      showToast(`Erro ao salvar reserva: ${error.message}`);
-      return;
-    }
-    setReservas((prev) => [...prev, data]);
-    setDia(data.data_retirada);
-    setFormRes(formVazio);
-    setModal(null);
-    showToast("Reserva salva");
-  };
-
-  const mudarStatusReserva = async (id, status) => {
-    const { data, error } = await supabase.from("reservas").update({ status }).eq("id", id).select().single();
-    if (error) {
-      console.error(error);
-      showToast(`Erro ao atualizar reserva: ${error.message}`);
-      return;
-    }
-    setReservas((prev) => prev.map((r) => (r.id === id ? data : r)));
-  };
-
-  const excluirReserva = async (id) => {
-    if (!window.confirm("Excluir esta reserva?")) return;
-    const { error } = await supabase.from("reservas").delete().eq("id", id);
-    if (error) {
-      console.error(error);
-      showToast(`Erro ao excluir reserva: ${error.message}`);
-      return;
-    }
-    setReservas((prev) => prev.filter((r) => r.id !== id));
-    setDetalheKey(null);
-  };
-
-  // ---------------- Ações do pedido (no detalhe) ----------------
+  // ---------------- Ações no detalhe do pedido ----------------
   const acaoPedido = async (p, proximo) => {
     let extra = {};
     if (proximo === "pronto") extra = { pronto_em: agoraISO() };
@@ -408,7 +435,7 @@ export default function BalcaoConsumer({
       if (motivo === null) return;
       extra = { cancelado_em: agoraISO(), motivo_cancelamento: motivo.trim() || null };
     }
-    const mensagem = proximo === "pronto" ? (p.tipoEntrega === "entrega" ? "Pedido saiu para entrega" : "Pedido pronto para retirada") : undefined;
+    const mensagem = proximo === "pronto" ? (p.tipoEntrega === "entrega" ? "Pedido saiu para entrega" : "Pedido aguardando retirada") : undefined;
     const ok = await atualizarStatusPedido(p.id, proximo, extra, mensagem);
     if (ok && ["concluido", "cancelado", "recusado"].includes(proximo)) setDetalheKey(null);
   };
@@ -419,8 +446,7 @@ export default function BalcaoConsumer({
     const { data, error } = await supabase.from("pedidos").update({ entregador: novo || null }).eq("id", p.id).select().single();
     if (error) {
       console.error(error);
-      if (/entregador/i.test(error.message || "")) showToast("Falta rodar migracao-balcao-reservas.sql no Supabase");
-      else showToast(`Erro ao salvar entregador: ${error.message}`);
+      showToast(`Erro ao salvar entregador: ${descreverErroBanco(error)}`);
       return;
     }
     if (onPedidoAtualizado) onPedidoAtualizado(data);
@@ -437,23 +463,15 @@ export default function BalcaoConsumer({
         {nomesEntregadores.map((n) => (<option key={n} value={n} />))}
       </datalist>
 
-      {/* barra de ações */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <button onClick={abrirPedido} style={{ ...btnPrimary, flex: 1 }}><Plus size={16} /> Novo pedido (F2)</button>
-        <button onClick={() => { setFormRes({ ...formVazio, data: dia }); setModal("reserva"); }} style={{ ...btnOutline, flex: 1 }}><CalendarPlus size={16} /> Nova reserva</button>
-        <button onClick={carregarReservas} aria-label="Atualizar" style={{ ...btnOutline, padding: "11px 12px" }}>
-          {carregando ? <Loader2 size={16} /> : <RefreshCw size={16} />}
-        </button>
-      </div>
+      <button onClick={abrirNovo} style={{ ...btnPrimary, width: "100%", marginBottom: 10 }}><Plus size={16} /> Novo pedido (F2)</button>
 
-      {/* busca e filtros */}
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", left: 11, top: 13, color: C.textFaint }} />
-        <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Pesquisar por nº, cliente ou item" style={{ ...inputStyle, paddingLeft: 33 }} />
+        <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Pesquisar por nº, cliente ou endereço" style={{ ...inputStyle, paddingLeft: 33 }} />
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", overflowX: "auto", paddingBottom: 6, marginBottom: 6 }}>
         <input type="date" value={dia} onChange={(e) => setDia(e.target.value || hoje)} style={{ ...inputStyle, width: "auto", flexShrink: 0 }} />
-        {[["todos", "Todos"], ["site", "Site"], ["balcao", "Balcão"], ["reserva", "Reservas"]].map(([id, label]) => (
+        {[["todos", "Todos"], ["site", "Site"], ["balcao", "Balcão"]].map(([id, label]) => (
           <button key={id} onClick={() => setFiltroOrigem(id)} style={chip(filtroOrigem === id)}>{label}</button>
         ))}
       </div>
@@ -462,9 +480,7 @@ export default function BalcaoConsumer({
           <button key={id} onClick={() => setFiltroStatus(id)} style={chip(filtroStatus === id)}>{label}</button>
         ))}
       </div>
-      {erroRes && <div style={{ color: C.red, fontSize: 12.5, marginBottom: 10 }}>{erroRes}</div>}
 
-      {/* tabela */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, overflowX: "auto" }}>
         <table style={{ width: "100%", minWidth: 940, borderCollapse: "collapse" }}>
           <thead>
@@ -485,12 +501,12 @@ export default function BalcaoConsumer({
             {linhas.map((l) => {
               const cor = corStatus(l.grupo);
               return (
-                <tr key={l.key} onClick={() => setDetalheKey(l.key)} style={{ cursor: "pointer" }}>
+                <tr key={l.key} onClick={() => setDetalheKey(l.key)} style={{ cursor: "pointer", background: destaqueId && l.ref.id === destaqueId ? C.orangeSoft : "transparent" }}>
                   <td style={{ ...td, fontWeight: 800 }}>{l.cod}</td>
                   <td style={td}>{fmtAbertura(l.abertura)}</td>
                   <td style={{ ...td, fontWeight: 700, color: l.andamento && l.duracao > 3600000 ? C.red : C.text }}>{l.duracao == null ? "—" : fmtDuracao(l.duracao)}</td>
                   <td style={{ ...td, fontWeight: 700 }}>{l.cliente}</td>
-                  <td style={td}>{l.origem === "balcao" ? "Balcão" : l.origem === "reserva" ? "Reserva" : "Site"}</td>
+                  <td style={td}>{l.origem === "balcao" ? "Balcão" : "Site"}</td>
                   <td style={td}>
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, background: cor.bg, color: cor.fg, whiteSpace: "nowrap" }}>{l.statusTxt}</span>
                   </td>
@@ -512,13 +528,13 @@ export default function BalcaoConsumer({
         {linhas.length === 0 && <EmptyState text="Nada neste dia com esses filtros" />}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 4px", fontSize: 13, fontWeight: 800 }}>
-        <span>{validos.length} registro{validos.length === 1 ? "" : "s"} (sem cancelados)</span>
+        <span>{validos.length} pedido{validos.length === 1 ? "" : "s"} (sem cancelados)</span>
         <span style={{ color: C.orangeText }}>{fmt(somaTotal)}</span>
       </div>
 
-      {/* modal: novo pedido */}
+      {/* modal: novo pedido / editar pedido */}
       {modal === "pedido" && (
-        <Modal C={C} titulo="Novo pedido" onClose={() => setModal(null)} largura={720}>
+        <Modal C={C} titulo={editandoId ? "Editar pedido" : "Novo pedido"} onClose={() => setModal(null)} largura={720}>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             <button onClick={() => setTipo("retirada")} style={{ ...chip(tipo === "retirada"), flex: 1, padding: "10px 12px" }}>Retirar no local</button>
             <button onClick={() => setTipo("entrega")} style={{ ...chip(tipo === "entrega"), flex: 1, padding: "10px 12px" }}>Entrega</button>
@@ -548,13 +564,13 @@ export default function BalcaoConsumer({
               </div>
             )}
           </div>
-          <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="Telefone" inputMode="tel" style={{ ...inputStyle, marginBottom: 12 }} />
+          <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="Telefone (opcional)" inputMode="tel" style={{ ...inputStyle, marginBottom: 12 }} />
 
           {tipo === "entrega" && (
             <>
               <FieldLabel>Endereço de entrega</FieldLabel>
               <div style={{ position: "relative", marginBottom: 8 }}>
-                <input value={cep} onChange={(e) => onCep(e.target.value)} placeholder="CEP (preenche o endereço sozinho)" inputMode="numeric" style={inputStyle} />
+                <input value={cep} onChange={(e) => onCep(e.target.value)} placeholder="CEP (preenche endereço, bairro e taxa)" inputMode="numeric" style={inputStyle} />
                 {buscandoCep && <div style={{ position: "absolute", right: 12, top: 11, color: C.textSoft }}><Loader2 size={16} /></div>}
               </div>
               <input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Endereço (rua)" style={{ ...inputStyle, marginBottom: 8 }} />
@@ -569,8 +585,17 @@ export default function BalcaoConsumer({
                 value={taxaManual ? taxaTxt : String(taxaSugerida).replace(".", ",")}
                 onChange={(e) => { setTaxaManual(true); setTaxaTxt(e.target.value); }}
                 inputMode="decimal"
-                style={{ ...inputStyle, marginBottom: 8 }}
+                style={{ ...inputStyle, marginBottom: 4 }}
               />
+              <div style={{ fontSize: 11.5, color: bairroCadastrado ? C.green : C.textSoft, marginBottom: 8 }}>
+                {taxaManual
+                  ? "Taxa editada na mão."
+                  : bairroCadastrado
+                    ? `Bairro cadastrado: ${bairroCadastrado.nome} — taxa ${fmt(taxaSugerida)}.`
+                    : bairro.trim()
+                      ? `O bairro "${bairro.trim()}" não está nos bairros de entrega. Usando a taxa padrão (${fmt(taxaSugerida)}).`
+                      : "Informe o CEP ou o bairro para calcular a taxa."}
+              </div>
               <FieldLabel>Entregador (opcional)</FieldLabel>
               <input list="entregadores-balcao" value={entregadorNovo} onChange={(e) => setEntregadorNovo(e.target.value)} placeholder="Selecione ou digite o nome" style={{ ...inputStyle, marginBottom: 12 }} />
             </>
@@ -620,52 +645,55 @@ export default function BalcaoConsumer({
             <input value={trocoPara} onChange={(e) => setTrocoPara(e.target.value)} placeholder="Troco para (R$) — opcional" inputMode="decimal" style={{ ...inputStyle, marginBottom: 10 }} />
           )}
           <input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Observação (opcional)" style={{ ...inputStyle, marginBottom: 10 }} />
-          {tipo === "retirada" && (
+
+          {!editandoId && tipo === "retirada" && (
+            <>
+              <FieldLabel>Situação do pedido</FieldLabel>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <button onClick={() => setStatusRetirada("aguardando")} style={{ ...chip(statusRetirada === "aguardando"), flex: 1, padding: "10px 12px" }}>Aguardando retirada</button>
+                <button onClick={() => setStatusRetirada("finalizado")} style={{ ...chip(statusRetirada === "finalizado"), flex: 1, padding: "10px 12px" }}>Finalizado</button>
+              </div>
+            </>
+          )}
+          {!editandoId && tipo === "entrega" && (
+            <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 12 }}>O pedido entra como <b>Em preparo</b>. Depois você marca "Saiu para entrega" e "Finalizado".</div>
+          )}
+          {!editandoId && imprimirPedido && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.textSoft, marginBottom: 12 }}>
-              <input type="checkbox" checked={entregueNaHora} onChange={(e) => setEntregueNaHora(e.target.checked)} />
-              Já entregue ao cliente (marca como Concluído)
+              <input type="checkbox" checked={imprimirAoLancar} onChange={(e) => setImprimirAoLancar(e.target.checked)} />
+              Imprimir comanda ao lançar
             </label>
           )}
-          <button onClick={lancarPedido} disabled={salvando || carrinho.length === 0} style={{ ...btnPrimary, width: "100%", opacity: salvando || carrinho.length === 0 ? 0.6 : 1 }}>
-            {salvando ? <Loader2 size={16} /> : <Check size={16} />} Lançar pedido
+
+          {erroPedido && (
+            <div style={{ background: C.redSoft, border: `1px solid ${C.red}`, color: C.red, borderRadius: 10, padding: "10px 12px", fontSize: 13, whiteSpace: "pre-line", marginBottom: 12 }}>
+              {erroPedido}
+            </div>
+          )}
+
+          <button onClick={lancarPedido} disabled={salvando} style={{ ...btnPrimary, width: "100%", opacity: salvando ? 0.6 : 1 }}>
+            {salvando ? <Loader2 size={16} /> : <Check size={16} />} {editandoId ? "Salvar alterações" : "Lançar pedido"}
           </button>
         </Modal>
       )}
 
-      {/* modal: nova reserva */}
-      {modal === "reserva" && (
-        <Modal C={C} titulo="Nova reserva (encomenda para retirar)" onClose={() => setModal(null)} largura={520}>
-          <input value={formRes.nome} onChange={(e) => setFormRes({ ...formRes, nome: e.target.value })} placeholder="Nome do cliente" style={{ ...inputStyle, marginBottom: 8 }} />
-          <input value={formRes.tel} onChange={(e) => setFormRes({ ...formRes, tel: e.target.value })} placeholder="Telefone / WhatsApp" inputMode="tel" style={{ ...inputStyle, marginBottom: 8 }} />
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input type="date" value={formRes.data} onChange={(e) => setFormRes({ ...formRes, data: e.target.value })} style={inputStyle} />
-            <input type="time" value={formRes.hora} onChange={(e) => setFormRes({ ...formRes, hora: e.target.value })} style={inputStyle} />
-          </div>
-          <textarea value={formRes.descricao} onChange={(e) => setFormRes({ ...formRes, descricao: e.target.value })} placeholder="O que foi encomendado (ex.: 3 frangos assados, 2 farofas)" rows={3} style={{ ...inputStyle, marginBottom: 8, resize: "vertical" }} />
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input value={formRes.valor} onChange={(e) => setFormRes({ ...formRes, valor: e.target.value })} placeholder="Valor total (R$)" inputMode="decimal" style={inputStyle} />
-            <input value={formRes.sinal} onChange={(e) => setFormRes({ ...formRes, sinal: e.target.value })} placeholder="Sinal pago (R$)" inputMode="decimal" style={inputStyle} />
-          </div>
-          <input value={formRes.obs} onChange={(e) => setFormRes({ ...formRes, obs: e.target.value })} placeholder="Observação (opcional)" style={{ ...inputStyle, marginBottom: 10 }} />
-          <button onClick={salvarReserva} disabled={salvandoRes} style={{ ...btnPrimary, width: "100%", opacity: salvandoRes ? 0.6 : 1 }}>
-            {salvandoRes ? <Loader2 size={16} /> : <Check size={16} />} Salvar reserva
-          </button>
-        </Modal>
-      )}
-
-      {/* modal: detalhe de um pedido */}
-      {detalhe && detalhe.tipo === "pedido" && (() => {
-        const p = detalhe.ref;
+      {/* modal: detalhe do pedido */}
+      {pedidoDet && (() => {
+        const p = pedidoDet;
         const ehEntrega = p.tipoEntrega === "entrega";
-        const etapas = [
-          ["pendente", "Novo"], ["aceito", "Aceito"], ["preparando", "Produção / Cozinha"],
-          ["pronto", ehEntrega ? "Saiu para entrega" : "Pronto / Retirar"], ["concluido", "Finalizado"],
-        ];
+        const etapas = etapasDoPedido(p);
         const idxAtual = etapas.findIndex(([k]) => k === p.status);
         const encerrado = p.status === "cancelado" || p.status === "recusado";
+        const origem = p.origem || "site";
+        const telOk = soDigitos(p.clienteTelefone).length >= 10;
+        const tipoAviso = p.status === "pronto" ? (ehEntrega ? "saiu" : "retirada") : (p.status === "aceito" || p.status === "preparando") ? "confirmado" : null;
+        const rotuloAviso = tipoAviso === "confirmado" ? "Confirmação no WhatsApp" : tipoAviso === "saiu" ? "Avisar que saiu" : "Avisar que está pronto";
+        const podeCancelar = p.status === "aceito" || p.status === "preparando" || p.status === "pronto";
         return (
-          <Modal C={C} titulo={`Pedido #${detalhe.cod} · ${p.clienteNome}`} onClose={() => setDetalheKey(null)} largura={520}>
-            {!encerrado && (
+          <Modal C={C} titulo={`Pedido #${codigoPedido(p)} · ${p.clienteNome}`} onClose={() => setDetalheKey(null)} largura={520}>
+            {encerrado ? (
+              <div style={{ color: C.red, fontWeight: 800, fontSize: 13, marginBottom: 12 }}>{rotuloPedido(p)}</div>
+            ) : (
               <div style={{ display: "flex", justifyContent: "space-between", gap: 4, marginBottom: 14 }}>
                 {etapas.map(([k, label], i) => {
                   const feito = i <= idxAtual;
@@ -680,9 +708,11 @@ export default function BalcaoConsumer({
                 })}
               </div>
             )}
+
             <div style={{ fontSize: 13, lineHeight: 1.6, color: C.textSoft, marginBottom: 10 }}>
-              <div>Origem: <b style={{ color: C.text }}>{detalhe.origem === "balcao" ? "Balcão" : "Site"}</b> · Aberto em {fmtAbertura(p.createdAt)}</div>
-              <div>{detalhe.entrega}{detalhe.entregaSub ? `: ${detalhe.entregaSub}` : ""}</div>
+              <div>Origem: <b style={{ color: C.text }}>{origem === "balcao" ? "Balcão" : "Site"}</b> · Aberto em {fmtAbertura(p.createdAt)}</div>
+              <div>{ehEntrega ? "Entregar no endereço" : "Retirar no local"}{ehEntrega ? `: ${[p.endereco, p.bairro].filter(Boolean).join(" - ")}` : ""}</div>
+              {p.referencia && <div>Referência: {p.referencia}</div>}
               {p.clienteTelefone && <div>Telefone: {p.clienteTelefone}</div>}
               <div>Pagamento: {p.formaPagamento}{p.precisaTroco && p.trocoPara != null ? ` (troco para ${fmt(p.trocoPara)})` : ""}</div>
               {p.observacao && <div>Obs.: {p.observacao}</div>}
@@ -697,6 +727,7 @@ export default function BalcaoConsumer({
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, margin: "10px 0 14px" }}>
               <span>Total</span><span style={{ color: C.orangeText }}>{fmt(p.total)}</span>
             </div>
+
             {ehEntrega && (
               <div style={{ marginBottom: 12 }}>
                 <FieldLabel>Entregador</FieldLabel>
@@ -710,46 +741,31 @@ export default function BalcaoConsumer({
                 />
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {p.status === "pendente" && <button onClick={() => acaoPedido(p, "aceito")} style={btnPrimary}><Check size={15} /> Aceitar</button>}
-              {p.status === "pendente" && <button onClick={() => acaoPedido(p, "recusado")} style={btnOutline}><X size={15} /> Recusar</button>}
-              {p.status === "aceito" && <button onClick={() => acaoPedido(p, "preparando")} style={btnPrimary}><Check size={15} /> Iniciar produção</button>}
-              {p.status === "preparando" && <button onClick={() => acaoPedido(p, "pronto")} style={btnPrimary}><Check size={15} /> {ehEntrega ? "Saiu para entrega" : "Pronto para retirada"}</button>}
-              {p.status === "pronto" && <button onClick={() => acaoPedido(p, "concluido")} style={btnPrimary}><Check size={15} /> Finalizar pedido</button>}
-              {(p.status === "aceito" || p.status === "preparando" || p.status === "pronto") && <button onClick={() => acaoPedido(p, "cancelado")} style={btnOutline}><X size={15} /> Cancelar</button>}
-            </div>
-          </Modal>
-        );
-      })()}
 
-      {/* modal: detalhe de uma reserva */}
-      {detalhe && detalhe.tipo === "reserva" && (() => {
-        const r = detalhe.ref;
-        const falta = arred((r.total || 0) - (r.sinal_pago || 0));
-        const aberta = r.status === "pendente" || r.status === "confirmada";
-        const msg = `Olá, ${String(r.cliente_nome).split(/\s+/)[0]}! Sua encomenda no Divino Frango para ${new Date(r.data_retirada + "T00:00").toLocaleDateString("pt-BR")}${r.hora_retirada ? ` às ${r.hora_retirada}` : ""} está confirmada ✅`;
-        const wa = linkWhatsApp(r.cliente_telefone, msg);
-        return (
-          <Modal C={C} titulo={`Reserva · ${r.cliente_nome}`} onClose={() => setDetalheKey(null)} largura={520}>
-            <div style={{ fontSize: 13, lineHeight: 1.6, color: C.textSoft, marginBottom: 10 }}>
-              <div>Retirada: <b style={{ color: C.text }}>{new Date(r.data_retirada + "T00:00").toLocaleDateString("pt-BR")} {r.hora_retirada ? `às ${r.hora_retirada}` : "(sem hora)"}</b></div>
-              {r.cliente_telefone && <div>Telefone: {r.cliente_telefone}</div>}
-              {r.observacao && <div>Obs.: {r.observacao}</div>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              {p.status === "pendente" && <button onClick={() => acaoPedido(p, "aceito")} style={btnPrimary}><Check size={15} /> Aceitar</button>}
+              {p.status === "aceito" && <button onClick={() => acaoPedido(p, "preparando")} style={btnPrimary}><Check size={15} /> Iniciar preparo</button>}
+              {p.status === "preparando" && <button onClick={() => acaoPedido(p, "pronto")} style={btnPrimary}><Check size={15} /> {ehEntrega ? "Saiu para entrega" : "Aguardando retirada"}</button>}
+              {p.status === "pronto" && <button onClick={() => acaoPedido(p, "concluido")} style={btnPrimary}><Check size={15} /> Finalizar pedido</button>}
+              <button onClick={() => setDetalheKey(null)} style={btnOutline}><ChevronLeft size={15} /> Voltar</button>
             </div>
-            <div style={{ fontSize: 14, whiteSpace: "pre-wrap", marginBottom: 10 }}>{r.descricao}</div>
-            {(r.total > 0 || r.sinal_pago > 0) && (
-              <div style={{ fontSize: 13, color: C.textSoft, marginBottom: 12 }}>
-                Total {fmt(r.total)} · Sinal {fmt(r.sinal_pago)} · <b style={{ color: falta > 0 ? C.orangeText : C.green }}>Falta {fmt(Math.max(falta, 0))}</b>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {!encerrado && <button onClick={() => abrirEdicao(p)} style={btnOutline}><Pencil size={15} /> Editar pedido</button>}
+              {imprimirPedido && <button onClick={() => imprimirPedido(p)} style={btnOutline}><Printer size={15} /> Imprimir comanda</button>}
+              {tipoAviso && telOk && abrirWhatsAppPedido && (
+                <button onClick={() => abrirWhatsAppPedido(p, tipoAviso)} style={btnOutline}><Phone size={15} /> {rotuloAviso}</button>
+              )}
+            </div>
+
+            {(p.status === "pendente" || podeCancelar) && (
+              <div style={{ borderTop: `1px solid ${C.borderSoft}`, marginTop: 14, paddingTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                {p.status === "pendente" ? (
+                  <button onClick={() => acaoPedido(p, "recusado")} style={{ ...btnOutline, color: C.red, borderColor: C.red, padding: "8px 12px", fontSize: 13 }}><X size={14} /> Recusar pedido</button>
+                ) : (
+                  <button onClick={() => acaoPedido(p, "cancelado")} style={{ ...btnOutline, color: C.red, borderColor: C.red, padding: "8px 12px", fontSize: 13 }}><X size={14} /> Cancelar pedido</button>
+                )}
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {r.status === "pendente" && <button onClick={() => mudarStatusReserva(r.id, "confirmada")} style={btnOutline}><Check size={15} /> Confirmar</button>}
-              {aberta && <button onClick={() => mudarStatusReserva(r.id, "retirada")} style={btnPrimary}><Check size={15} /> Retirada</button>}
-              {aberta && <button onClick={() => mudarStatusReserva(r.id, "cancelada")} style={btnOutline}><X size={15} /> Cancelar</button>}
-              {!aberta && <button onClick={() => mudarStatusReserva(r.id, "pendente")} style={btnOutline}>Reabrir</button>}
-              {wa && <a href={wa} target="_blank" rel="noreferrer" style={{ ...btnOutline, textDecoration: "none" }}><Phone size={15} /> WhatsApp</a>}
-              <button onClick={() => excluirReserva(r.id)} style={iconBtnStyle} aria-label="Excluir reserva"><Trash2 size={17} color={C.red} /></button>
-            </div>
           </Modal>
         );
       })()}
