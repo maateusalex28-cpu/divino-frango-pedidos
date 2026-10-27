@@ -211,6 +211,7 @@ const mapPedidoFromDb = (r) => ({
   motivoCancelamento: r.motivo_cancelamento || undefined,
   numero: r.numero ?? r.numero_pedido ?? null,
   origem: r.origem || "site",
+  entregador: r.entregador || undefined,
 });
 
 // ---------- mensagens prontas para o WhatsApp do cliente ----------
@@ -1954,6 +1955,11 @@ export default function AdminApp() {
             labelStatus={LABEL_STATUS}
             atualizarStatusPedido={atualizarStatusPedido}
             bairrosEntrega={bairrosEntrega}
+            funcionarios={funcionarios}
+            rotuloStatus={rotuloStatusPedido}
+            onPedidoAtualizado={(row) =>
+              setPedidos((prev) => prev.map((p) => (p.id === row.id ? mapPedidoFromDb(row) : p)))
+            }
             taxaPadrao={Number(taxaEntregaForm) || 0}
             onPedidoCriado={(row) =>
               setPedidos((prev) => (prev.some((p) => p.id === row.id) ? prev : [mapPedidoFromDb(row), ...prev]))

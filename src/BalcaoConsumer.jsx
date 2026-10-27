@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Plus, Minus, Trash2, Check, X, Search, Phone, Loader2, RefreshCw, CalendarPlus } from "lucide-react";
+import { Plus, Minus, Trash2, Check, X, Search, Phone, Loader2, RefreshCw, CalendarPlus, Flag } from "lucide-react";
 
 const FORMAS = ["Dinheiro", "Pix", "Cartão"];
 
@@ -61,7 +61,7 @@ function Modal({ C, titulo, onClose, largura = 640, children }) {
 export default function BalcaoConsumer({
   supabase, C, fmt, FieldLabel, EmptyState, inputStyle, btnPrimary, btnOutline, iconBtnStyle,
   showToast, dataLocalISO, cardapio, pedidos, codigoPedido, labelStatus, onPedidoCriado, atualizarStatusPedido,
-  bairrosEntrega, taxaPadrao,
+  bairrosEntrega, taxaPadrao, funcionarios, rotuloStatus, onPedidoAtualizado,
 }) {
   const hoje = dataLocalISO();
   const [dia, setDia] = useState(hoje);
@@ -116,7 +116,8 @@ export default function BalcaoConsumer({
         duracao: grupo === "andamento" ? agora - new Date(p.createdAt).getTime() : fim ? new Date(fim).getTime() - new Date(p.createdAt).getTime() : null,
         andamento: grupo === "andamento",
         cliente: p.clienteNome, origem: p.origem || "site", grupo,
-        statusTxt: (labelStatus && labelStatus[p.status]) || p.status,
+        statusTxt: (rotuloStatus && rotuloStatus(p)) || (labelStatus && labelStatus[p.status]) || p.status,
+        ehEntrega: p.tipoEntrega === "entrega", entregador: p.entregador || "",
         entrega: p.tipoEntrega === "entrega" ? "Entregar no endereço" : "Retirar no local",
         entregaSub: p.tipoEntrega === "entrega" ? [p.endereco, p.bairro].filter(Boolean).join(" - ") : "",
         pagamento: p.formaPagamento || "", total: p.total || 0, agendado: "",
@@ -126,7 +127,7 @@ export default function BalcaoConsumer({
       key: `r${r.id}`, tipo: "reserva", ref: r, cod: `R${String(r.id).slice(0, 3).toUpperCase()}`, abertura: r.created_at,
       duracao: null, andamento: false, cliente: r.cliente_nome, origem: "reserva", grupo: grupoReserva(r.status),
       statusTxt: LABEL_RESERVA[r.status] || r.status, entrega: "Retirar no local", entregaSub: r.descricao,
-      pagamento: "", total: r.total || 0, agendado: r.hora_retirada || "Sem hora",
+      pagamento: "", total: r.total || 0, agendado: r.hora_retirada || "Sem hora", ehEntrega: false, entregador: "",
     }));
     const termo = semAcento(pesquisa);
     return [...ps, ...rs]
@@ -134,7 +135,7 @@ export default function BalcaoConsumer({
       .filter((l) => filtroStatus === "todos" || l.grupo === filtroStatus)
       .filter((l) => !termo || semAcento(`${l.cod} ${l.cliente} ${l.entregaSub}`).includes(termo))
       .sort((a, b) => String(b.abertura).localeCompare(String(a.abertura)));
-  }, [pedidos, reservas, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO, labelStatus]);
+  }, [pedidos, reservas, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO, labelStatus, rotuloStatus]);
 
   const validos = linhas.filter((l) => l.grupo !== "cancelado");
   const somaTotal = arred(validos.reduce((s, l) => s + l.total, 0));
@@ -162,6 +163,21 @@ export default function BalcaoConsumer({
   const [salvando, setSalvando] = useState(false);
   const [contatos, setContatos] = useState([]);
   const [mostrarSug, setMostrarSug] = useState(false);
+  const [entregadorNovo, setEntregadorNovo] = useState("");
+  const [entregadorTxt, setEntregadorTxt] = useState("");
+
+  const nomesEntregadores = useMemo(() => {
+    const todos = (funcionarios || []).filter((f) => f.nome);
+    const motos = todos.filter((f) => /entreg|moto/i.test(f.funcao || ""));
+    return (motos.length ? motos : todos).map((f) => f.nome);
+  }, [funcionarios]);
+
+  // ao abrir um pedido, carrega o entregador atual no campo
+  useEffect(() => {
+    const ped = (pedidos || []).find((x) => `p${x.id}` === detalheKey);
+    setEntregadorTxt(ped?.entregador || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detalheKey]);
 
   // contatos já cadastrados (se a tabela existir); erros são ignorados
   useEffect(() => {
@@ -277,7 +293,7 @@ export default function BalcaoConsumer({
   const limparPedido = () => {
     setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
     setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
-    setForma("Dinheiro"); setTipo("retirada"); setEntregueNaHora(true);
+    setForma("Dinheiro"); setTipo("retirada"); setEntregueNaHora(true); setEntregadorNovo("");
   };
 
   const lancarPedido = async () => {
@@ -308,14 +324,14 @@ export default function BalcaoConsumer({
       data_pedido: hoje,
       ...(concluir ? { concluido_em: agoraISO() } : {}),
       ...(tipo === "entrega"
-        ? { cep: cep || null, endereco: enderecoCompleto, bairro: bairro.trim() || null, referencia: referencia.trim() || null }
+        ? { cep: cep || null, endereco: enderecoCompleto, bairro: bairro.trim() || null, referencia: referencia.trim() || null, ...(entregadorNovo.trim() ? { entregador: entregadorNovo.trim() } : {}) }
         : {}),
     };
     const { data, error } = await supabase.from("pedidos").insert(linha).select().single();
     setSalvando(false);
     if (error) {
       console.error(error);
-      if (/origem/i.test(error.message || "")) showToast("Falta rodar migracao-balcao-reservas.sql no Supabase");
+      if (/origem|entregador/i.test(error.message || "")) showToast("Falta rodar migracao-balcao-reservas.sql no Supabase");
       else showToast(`Erro ao lançar pedido: ${error.message}`);
       return;
     }
@@ -392,8 +408,23 @@ export default function BalcaoConsumer({
       if (motivo === null) return;
       extra = { cancelado_em: agoraISO(), motivo_cancelamento: motivo.trim() || null };
     }
-    const ok = await atualizarStatusPedido(p.id, proximo, extra);
-    if (ok) setDetalheKey(null);
+    const mensagem = proximo === "pronto" ? (p.tipoEntrega === "entrega" ? "Pedido saiu para entrega" : "Pedido pronto para retirada") : undefined;
+    const ok = await atualizarStatusPedido(p.id, proximo, extra, mensagem);
+    if (ok && ["concluido", "cancelado", "recusado"].includes(proximo)) setDetalheKey(null);
+  };
+
+  const salvarEntregador = async (p) => {
+    const novo = entregadorTxt.trim();
+    if (novo === (p.entregador || "")) return;
+    const { data, error } = await supabase.from("pedidos").update({ entregador: novo || null }).eq("id", p.id).select().single();
+    if (error) {
+      console.error(error);
+      if (/entregador/i.test(error.message || "")) showToast("Falta rodar migracao-balcao-reservas.sql no Supabase");
+      else showToast(`Erro ao salvar entregador: ${error.message}`);
+      return;
+    }
+    if (onPedidoAtualizado) onPedidoAtualizado(data);
+    showToast(novo ? `Entregador: ${novo}` : "Entregador removido");
   };
 
   const th = { textAlign: "left", padding: "9px 10px", fontSize: 11.5, fontWeight: 800, color: C.textSoft, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" };
@@ -402,6 +433,10 @@ export default function BalcaoConsumer({
   // ---------------- Tela ----------------
   return (
     <>
+      <datalist id="entregadores-balcao">
+        {nomesEntregadores.map((n) => (<option key={n} value={n} />))}
+      </datalist>
+
       {/* barra de ações */}
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button onClick={abrirPedido} style={{ ...btnPrimary, flex: 1 }}><Plus size={16} /> Novo pedido (F2)</button>
@@ -431,7 +466,7 @@ export default function BalcaoConsumer({
 
       {/* tabela */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 820, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: 940, borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th style={th}>Pedido</th>
@@ -441,6 +476,7 @@ export default function BalcaoConsumer({
               <th style={th}>Origem</th>
               <th style={th}>Status</th>
               <th style={th}>Entrega</th>
+              <th style={th}>Entregador</th>
               <th style={{ ...th, textAlign: "right" }}>Total</th>
               <th style={th}>Agendado para</th>
             </tr>
@@ -462,6 +498,7 @@ export default function BalcaoConsumer({
                     <div style={{ fontWeight: 700 }}>{l.entrega}</div>
                     {l.entregaSub && <div style={{ fontSize: 11.5, color: C.textSoft, maxWidth: 220 }}>{l.entregaSub}</div>}
                   </td>
+                  <td style={{ ...td, color: l.entregador ? C.text : C.textFaint }}>{l.ehEntrega ? l.entregador || "Selecione…" : ""}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>
                     {fmt(l.total)}
                     {l.pagamento && <div style={{ fontSize: 11, color: C.textSoft, fontWeight: 500 }}>{l.pagamento}</div>}
@@ -532,8 +569,10 @@ export default function BalcaoConsumer({
                 value={taxaManual ? taxaTxt : String(taxaSugerida).replace(".", ",")}
                 onChange={(e) => { setTaxaManual(true); setTaxaTxt(e.target.value); }}
                 inputMode="decimal"
-                style={{ ...inputStyle, marginBottom: 12 }}
+                style={{ ...inputStyle, marginBottom: 8 }}
               />
+              <FieldLabel>Entregador (opcional)</FieldLabel>
+              <input list="entregadores-balcao" value={entregadorNovo} onChange={(e) => setEntregadorNovo(e.target.value)} placeholder="Selecione ou digite o nome" style={{ ...inputStyle, marginBottom: 12 }} />
             </>
           )}
 
@@ -617,8 +656,30 @@ export default function BalcaoConsumer({
       {/* modal: detalhe de um pedido */}
       {detalhe && detalhe.tipo === "pedido" && (() => {
         const p = detalhe.ref;
+        const ehEntrega = p.tipoEntrega === "entrega";
+        const etapas = [
+          ["pendente", "Novo"], ["aceito", "Aceito"], ["preparando", "Produção / Cozinha"],
+          ["pronto", ehEntrega ? "Saiu para entrega" : "Pronto / Retirar"], ["concluido", "Finalizado"],
+        ];
+        const idxAtual = etapas.findIndex(([k]) => k === p.status);
+        const encerrado = p.status === "cancelado" || p.status === "recusado";
         return (
           <Modal C={C} titulo={`Pedido #${detalhe.cod} · ${p.clienteNome}`} onClose={() => setDetalheKey(null)} largura={520}>
+            {!encerrado && (
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 4, marginBottom: 14 }}>
+                {etapas.map(([k, label], i) => {
+                  const feito = i <= idxAtual;
+                  const atual = i === idxAtual;
+                  const cor = feito ? (atual ? C.orange : C.green) : C.textFaint;
+                  return (
+                    <div key={k} style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
+                      <Flag size={20} color={cor} fill={feito ? cor : "none"} />
+                      <div style={{ fontSize: 10.5, marginTop: 3, fontWeight: atual ? 800 : 500, color: atual ? C.orangeText : feito ? C.text : C.textFaint, lineHeight: 1.2 }}>{label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div style={{ fontSize: 13, lineHeight: 1.6, color: C.textSoft, marginBottom: 10 }}>
               <div>Origem: <b style={{ color: C.text }}>{detalhe.origem === "balcao" ? "Balcão" : "Site"}</b> · Aberto em {fmtAbertura(p.createdAt)}</div>
               <div>{detalhe.entrega}{detalhe.entregaSub ? `: ${detalhe.entregaSub}` : ""}</div>
@@ -636,11 +697,25 @@ export default function BalcaoConsumer({
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, margin: "10px 0 14px" }}>
               <span>Total</span><span style={{ color: C.orangeText }}>{fmt(p.total)}</span>
             </div>
+            {ehEntrega && (
+              <div style={{ marginBottom: 12 }}>
+                <FieldLabel>Entregador</FieldLabel>
+                <input
+                  list="entregadores-balcao"
+                  value={entregadorTxt}
+                  onChange={(e) => setEntregadorTxt(e.target.value)}
+                  onBlur={() => salvarEntregador(p)}
+                  placeholder="Selecione ou digite o nome"
+                  style={inputStyle}
+                />
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {p.status === "pendente" && <button onClick={() => acaoPedido(p, "aceito")} style={btnPrimary}><Check size={15} /> Aceitar</button>}
               {p.status === "pendente" && <button onClick={() => acaoPedido(p, "recusado")} style={btnOutline}><X size={15} /> Recusar</button>}
-              {(p.status === "aceito" || p.status === "preparando") && <button onClick={() => acaoPedido(p, "pronto")} style={btnPrimary}><Check size={15} /> Pronto</button>}
-              {(p.status === "aceito" || p.status === "preparando" || p.status === "pronto") && <button onClick={() => acaoPedido(p, "concluido")} style={p.status === "pronto" ? btnPrimary : btnOutline}><Check size={15} /> Concluir</button>}
+              {p.status === "aceito" && <button onClick={() => acaoPedido(p, "preparando")} style={btnPrimary}><Check size={15} /> Iniciar produção</button>}
+              {p.status === "preparando" && <button onClick={() => acaoPedido(p, "pronto")} style={btnPrimary}><Check size={15} /> {ehEntrega ? "Saiu para entrega" : "Pronto para retirada"}</button>}
+              {p.status === "pronto" && <button onClick={() => acaoPedido(p, "concluido")} style={btnPrimary}><Check size={15} /> Finalizar pedido</button>}
               {(p.status === "aceito" || p.status === "preparando" || p.status === "pronto") && <button onClick={() => acaoPedido(p, "cancelado")} style={btnOutline}><X size={15} /> Cancelar</button>}
             </div>
           </Modal>

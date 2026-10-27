@@ -356,3 +356,14 @@ O botão **Novo pedido (F2)** abre uma janela parecida com a do Consumer:
 - **Entrega:** nome, telefone e **CEP**, que preenche rua e bairro sozinho (consulta o ViaCEP; precisa de internet). Depois é só informar número e complemento. A taxa vem do bairro cadastrado em Configurações (ou da taxa padrão) e pode ser editada na hora. Tem campo de troco para pagamento em dinheiro.
 - **Cliente:** ao digitar o nome, aparecem clientes que já fizeram pedido (site ou balcão) e os contatos cadastrados. Ao escolher um, o telefone e o último endereço de entrega são preenchidos. Cliente novo fica guardado no próprio pedido, sem cadastro separado.
 - Não existe campo de entregador (não há essa informação no banco hoje).
+
+#### Etapas do pedido e entregador (versão Consumer)
+
+- Ao clicar numa linha, o detalhe do pedido mostra a trilha de etapas: Novo, Aceito, Produção / Cozinha, Saiu para entrega (entrega) ou Pronto / Retirar (retirada) e Finalizado. O botão principal avança uma etapa por vez. Os status do banco são os mesmos de sempre: `pendente`, `aceito`, `preparando` (produção), `pronto` (saiu para entrega ou pronto para retirada), `concluido`.
+- **Entregador:** campo nos pedidos de entrega (no novo pedido e no detalhe), com sugestão dos nomes da equipe (funcionários com função de entregador/moto; se nenhum tiver, todos). Fica na coluna `pedidos.entregador`, criada por `supabase/migracao-balcao-reservas.sql` (rode de novo esse arquivo; é seguro repetir). A tabela mostra a coluna Entregador.
+
+#### Etapas e entregador (versão Consumer)
+
+O detalhe do pedido mostra a trilha de etapas: **Novo, Aceito, Produção / Cozinha, Pronto / Retirar (ou Saiu para entrega), Finalizado**. Elas usam os status que o sistema já tem: `pendente`, `aceito`, `preparando`, `pronto` e `concluido`. Em pedido de entrega, `pronto` significa "Saiu para entrega".
+
+Pedidos de entrega têm campo **Entregador** (nome digitado ou escolhido da equipe), gravado em `pedidos.entregador`. Rode de novo `supabase/migracao-balcao-reservas.sql` para criar essa coluna (pode rodar mais de uma vez).

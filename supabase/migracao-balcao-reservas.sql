@@ -4,6 +4,9 @@
 -- 1) Origem do pedido: 'site' (cliente) ou 'balcao' (lançado no painel).
 alter table pedidos add column if not exists origem text not null default 'site';
 
+-- Entregador do pedido (nome de quem levou a entrega).
+alter table pedidos add column if not exists entregador text;
+
 -- 2) Reservas / encomendas para retirar.
 create table if not exists reservas (
   id uuid primary key default gen_random_uuid(),
