@@ -380,3 +380,9 @@ Pedidos de entrega têm campo **Entregador** (nome digitado ou escolhido da equi
 - **Pedido do site:** ao tocar em **Aceitar** na aba Pedidos, o painel abre a aba Balcão no dia do pedido e destaca a linha por alguns segundos.
 - **Detalhe:** o botão **Cancelar pedido** (ou **Recusar**, se o pedido ainda é novo) ficou separado, no rodapé, e no lugar dele há o botão **Voltar**.
 - Rode de novo `supabase/migracao-balcao-reservas.sql` para criar a coluna `entregador`.
+
+#### Travas do banco e pedidos do balcão
+
+O banco tem três funções de gatilho na tabela `pedidos`: `validar_pedido` (exige telefone, confere itens e preços, recalcula taxa e total, força `status = 'pendente'`), `bloquear_pedido_loja_fechada` e `baixar_estoque_pedido`. Sem ajuste, elas recusam ou alteram o pedido lançado pelo painel (telefone vazio, bairro fora da lista, loja fechada, status trocado para `pendente`).
+
+**Rode no SQL Editor, depois do `migracao-balcao-reservas.sql`:** [`supabase/migracao-balcao-gatilhos.sql`](./supabase/migracao-balcao-gatilhos.sql). Ele libera só o pedido com `origem = 'balcao'` feito por usuário logado (e `eh_admin()`, se existir). Pedidos do site continuam com todas as validações. O baixar estoque continua funcionando para pedidos do balcão. Pode rodar mais de uma vez.

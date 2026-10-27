@@ -102,7 +102,7 @@ export default function BalcaoConsumer({
   const [detalheKey, setDetalheKey] = useState(null);
 
   useEffect(() => {
-    const t = setInterval(() => setAgora(Date.now()), 30000);
+    const t = setInterval(() => setAgora(Date.now()), 15000);
     return () => clearInterval(t);
   }, []);
 
@@ -689,6 +689,11 @@ export default function BalcaoConsumer({
         const tipoAviso = p.status === "pronto" ? (ehEntrega ? "saiu" : "retirada") : (p.status === "aceito" || p.status === "preparando") ? "confirmado" : null;
         const rotuloAviso = tipoAviso === "confirmado" ? "Confirmação no WhatsApp" : tipoAviso === "saiu" ? "Avisar que saiu" : "Avisar que está pronto";
         const podeCancelar = p.status === "aceito" || p.status === "preparando" || p.status === "pronto";
+        const criadoMs = p.createdAt ? new Date(p.createdAt).getTime() : null;
+        const fimMs = p.concluidoEm || p.canceladoEm ? new Date(p.concluidoEm || p.canceladoEm).getTime() : null;
+        const tempoCorrido = grupoPedido(p.status) === "andamento"
+          ? { andamento: true, ms: criadoMs ? agora - criadoMs : null }
+          : { andamento: false, ms: criadoMs && fimMs ? fimMs - criadoMs : null };
         return (
           <Modal C={C} titulo={`Pedido #${codigoPedido(p)} · ${p.clienteNome}`} onClose={() => setDetalheKey(null)} largura={520}>
             {encerrado ? (
@@ -711,6 +716,11 @@ export default function BalcaoConsumer({
 
             <div style={{ fontSize: 13, lineHeight: 1.6, color: C.textSoft, marginBottom: 10 }}>
               <div>Origem: <b style={{ color: C.text }}>{origem === "balcao" ? "Balcão" : "Site"}</b> · Aberto em {fmtAbertura(p.createdAt)}</div>
+              <div>
+                Lançado às <b style={{ color: C.text }}>{p.createdAt ? new Date(p.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—"}</b>
+                {" · "}{tempoCorrido.andamento ? "há " : "levou "}
+                <b style={{ color: tempoCorrido.andamento && tempoCorrido.ms > 3600000 ? C.red : C.text }}>{fmtDuracao(tempoCorrido.ms)}</b>
+              </div>
               <div>{ehEntrega ? "Entregar no endereço" : "Retirar no local"}{ehEntrega ? `: ${[p.endereco, p.bairro].filter(Boolean).join(" - ")}` : ""}</div>
               {p.referencia && <div>Referência: {p.referencia}</div>}
               {p.clienteTelefone && <div>Telefone: {p.clienteTelefone}</div>}
