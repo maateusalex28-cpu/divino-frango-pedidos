@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Plus, Minus, Check, X, Search, Phone, Loader2, Flag, Printer, Pencil, ChevronLeft } from "lucide-react";
 
 const FORMAS = ["Dinheiro", "Pix", "Cartão"];
+const FORMA_PIX_ENTREGA = "Pix na entrega";
+// "Pix na entrega" só faz sentido em pedido de entrega e fica por último
+const formasDisponiveis = (entrega) => (entrega ? [...FORMAS, FORMA_PIX_ENTREGA] : FORMAS);
 
 const paraNumero = (v) => {
   const s = String(v ?? "").trim();
@@ -174,7 +177,7 @@ export default function BalcaoConsumer({
   const [taxaTxt, setTaxaTxt] = useState("");
   const [taxaManual, setTaxaManual] = useState(false);
   const [buscandoCep, setBuscandoCep] = useState(false);
-  const [forma, setForma] = useState("Dinheiro");
+  const [forma, setForma] = useState(""); // vazio = pagamento ainda não informado
   const [trocoPara, setTrocoPara] = useState("");
   const [obs, setObs] = useState("");
   const [statusRetirada, setStatusRetirada] = useState("aguardando"); // aguardando | finalizado
@@ -309,7 +312,7 @@ export default function BalcaoConsumer({
     setEditandoId(null); setErroPedido(""); setBusca("");
     setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
     setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
-    setForma("Dinheiro"); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo("");
+    setForma(""); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo("");
   };
   const abrirNovo = () => { limparPedido(); setModal("pedido"); };
 
@@ -321,7 +324,7 @@ export default function BalcaoConsumer({
     setTelefone(p.clienteTelefone || "");
     setCep(p.cep || ""); setRua(p.endereco || ""); setBairro(p.bairro || ""); setReferencia(p.referencia || "");
     setTaxaManual(true); setTaxaTxt(String(p.taxaEntrega || 0).replace(".", ","));
-    setForma(p.formaPagamento || "Dinheiro");
+    setForma(p.formaPagamento || "");
     setTrocoPara(p.precisaTroco && p.trocoPara != null ? String(p.trocoPara).replace(".", ",") : "");
     setObs(p.observacao || "");
     setEntregadorNovo(p.entregador || "");
@@ -440,6 +443,20 @@ export default function BalcaoConsumer({
     if (ok && ["concluido", "cancelado", "recusado"].includes(proximo)) setDetalheKey(null);
   };
 
+  // define ou troca a forma de pagamento depois de lançado; tocar na forma atual limpa o campo
+  const salvarPagamento = async (p, nova) => {
+    const campos = { forma_pagamento: nova };
+    if (nova !== "Dinheiro") Object.assign(campos, { precisa_troco: false, troco_para: null });
+    const { data, error } = await supabase.from("pedidos").update(campos).eq("id", p.id).select().single();
+    if (error) {
+      console.error(error);
+      showToast(`Erro ao salvar o pagamento: ${descreverErroBanco(error)}`);
+      return;
+    }
+    if (onPedidoAtualizado) onPedidoAtualizado(data);
+    showToast(nova ? `Pagamento: ${nova}` : "Pagamento removido");
+  };
+
   const salvarEntregador = async (p) => {
     const novo = entregadorTxt.trim();
     if (novo === (p.entregador || "")) return;
@@ -517,7 +534,9 @@ export default function BalcaoConsumer({
                   <td style={{ ...td, color: l.entregador ? C.text : C.textFaint }}>{l.ehEntrega ? l.entregador || "Selecione…" : ""}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>
                     {fmt(l.total)}
-                    {l.pagamento && <div style={{ fontSize: 11, color: C.textSoft, fontWeight: 500 }}>{l.pagamento}</div>}
+                    {l.pagamento
+                      ? <div style={{ fontSize: 11, color: C.textSoft, fontWeight: 500 }}>{l.pagamento}</div>
+                      : l.grupo !== "cancelado" && <div style={{ fontSize: 11, color: C.orangeText, fontWeight: 700 }}>Pagamento a definir</div>}
                   </td>
                   <td style={td}>{l.agendado}</td>
                 </tr>
@@ -536,7 +555,7 @@ export default function BalcaoConsumer({
       {modal === "pedido" && (
         <Modal C={C} titulo={editandoId ? "Editar pedido" : "Novo pedido"} onClose={() => setModal(null)} largura={720}>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <button onClick={() => setTipo("retirada")} style={{ ...chip(tipo === "retirada"), flex: 1, padding: "10px 12px" }}>Retirar no local</button>
+            <button onClick={() => { setTipo("retirada"); if (forma === FORMA_PIX_ENTREGA) setForma(""); }} style={{ ...chip(tipo === "retirada"), flex: 1, padding: "10px 12px" }}>Retirar no local</button>
             <button onClick={() => setTipo("entrega")} style={{ ...chip(tipo === "entrega"), flex: 1, padding: "10px 12px" }}>Entrega</button>
           </div>
 
@@ -637,10 +656,13 @@ export default function BalcaoConsumer({
             </div>
           </div>
 
-          <FieldLabel>Pagamento</FieldLabel>
+          <FieldLabel>Pagamento (opcional — dá para definir depois)</FieldLabel>
           <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-            {FORMAS.map((f) => (<button key={f} onClick={() => setForma(f)} style={chip(forma === f)}>{f}</button>))}
+            {formasDisponiveis(tipo === "entrega").map((f) => (
+              <button key={f} onClick={() => setForma(forma === f ? "" : f)} style={chip(forma === f)}>{f}</button>
+            ))}
           </div>
+          {!forma && <div style={{ fontSize: 11.5, color: C.textSoft, marginBottom: 10 }}>Sem forma de pagamento por enquanto. Você define no detalhe do pedido quando o cliente responder.</div>}
           {forma === "Dinheiro" && (
             <input value={trocoPara} onChange={(e) => setTrocoPara(e.target.value)} placeholder="Troco para (R$) — opcional" inputMode="decimal" style={{ ...inputStyle, marginBottom: 10 }} />
           )}
@@ -724,7 +746,7 @@ export default function BalcaoConsumer({
               <div>{ehEntrega ? "Entregar no endereço" : "Retirar no local"}{ehEntrega ? `: ${[p.endereco, p.bairro].filter(Boolean).join(" - ")}` : ""}</div>
               {p.referencia && <div>Referência: {p.referencia}</div>}
               {p.clienteTelefone && <div>Telefone: {p.clienteTelefone}</div>}
-              <div>Pagamento: {p.formaPagamento}{p.precisaTroco && p.trocoPara != null ? ` (troco para ${fmt(p.trocoPara)})` : ""}</div>
+              <div>Pagamento: {p.formaPagamento || "a definir"}{p.precisaTroco && p.trocoPara != null ? ` (troco para ${fmt(p.trocoPara)})` : ""}</div>
               {p.observacao && <div>Obs.: {p.observacao}</div>}
               {p.motivoCancelamento && <div style={{ color: C.red }}>Motivo: {p.motivoCancelamento}</div>}
             </div>
@@ -749,6 +771,18 @@ export default function BalcaoConsumer({
                   placeholder="Selecione ou digite o nome"
                   style={inputStyle}
                 />
+              </div>
+            )}
+
+            {!encerrado && (
+              <div style={{ marginBottom: 12 }}>
+                <FieldLabel>Forma de pagamento</FieldLabel>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {formasDisponiveis(ehEntrega).map((f) => (
+                    <button key={f} onClick={() => salvarPagamento(p, p.formaPagamento === f ? "" : f)} style={chip(p.formaPagamento === f)}>{f}</button>
+                  ))}
+                </div>
+                {!p.formaPagamento && <div style={{ fontSize: 11.5, color: C.orangeText, marginTop: 6 }}>Ainda não informada. Toque numa opção para definir.</div>}
               </div>
             )}
 

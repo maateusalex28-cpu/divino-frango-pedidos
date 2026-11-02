@@ -9,6 +9,7 @@ do $do$
 declare
   def text;
   pos int;
+  achado text;
   injecao text := $inj$
   declare
     v_adm_bal boolean := false;
@@ -37,11 +38,14 @@ begin
   if position('bypass_balcao' in def) > 0 then
     return; -- já aplicado
   end if;
-  pos := position(E'\nbegin\n' in def);
-  if pos = 0 then
-    raise exception 'Não encontrei o início da função validar_pedido; nada foi alterado.';
+  -- acha a linha "begin" que abre o corpo da função (aceita fim de linha \n ou \r\n)
+  achado := (regexp_match(def, E'\\n[ \\t]*begin[ \\t]*\\r?\\n'))[1];
+  if achado is null then
+    raise exception 'Não encontrei o início da função validar_pedido; nada foi alterado. Trecho: [%]',
+      replace(replace(substr(def, greatest(position('begin' in lower(def)) - 20, 1), 90), E'\r', '<CR>'), E'\n', '<LF>');
   end if;
-  def := substr(def, 1, pos + 6) || injecao || substr(def, pos + 7);
+  pos := position(achado in def);
+  def := substr(def, 1, pos - 1 + length(achado)) || injecao || substr(def, pos + length(achado));
   execute def;
 end
 $do$;
