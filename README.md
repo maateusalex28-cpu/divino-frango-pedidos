@@ -386,3 +386,19 @@ Pedidos de entrega têm campo **Entregador** (nome digitado ou escolhido da equi
 O banco tem três funções de gatilho na tabela `pedidos`: `validar_pedido` (exige telefone, confere itens e preços, recalcula taxa e total, força `status = 'pendente'`), `bloquear_pedido_loja_fechada` e `baixar_estoque_pedido`. Sem ajuste, elas recusam ou alteram o pedido lançado pelo painel (telefone vazio, bairro fora da lista, loja fechada, status trocado para `pendente`).
 
 **Rode no SQL Editor, depois do `migracao-balcao-reservas.sql`:** [`supabase/migracao-balcao-gatilhos.sql`](./supabase/migracao-balcao-gatilhos.sql). Ele libera só o pedido com `origem = 'balcao'` feito por usuário logado (e `eh_admin()`, se existir). Pedidos do site continuam com todas as validações. O baixar estoque continua funcionando para pedidos do balcão. Pode rodar mais de uma vez.
+
+#### Pagamento opcional e "Pix na entrega"
+
+- O pedido pode ser lançado **sem forma de pagamento**. Ele fica marcado como "Pagamento a definir" na tabela e na comanda.
+- No detalhe do pedido há botões para definir ou trocar a forma de pagamento depois (tocar na forma atual limpa o campo).
+- Em pedido de **entrega** há a opção **Pix na entrega**, por último. Ela não aparece em retirada.
+
+#### Usuário funcionário (atendente) e relatórios
+
+**Rode no SQL Editor do Supabase:** [`supabase/migracao-funcionario.sql`](./supabase/migracao-funcionario.sql) (depois de `migracao-seguranca.sql` e `migracao-balcao-reservas.sql`). Ele já inclui o que faz o `migracao-balcao-gatilhos.sql`; rodar os dois não tem problema. Cria a tabela `atendentes`, as funções `meu_perfil`, `registrar_atendente`, `listar_atendentes` e `remover_atendente`, e dá ao atendente acesso só a `pedidos`, `cardapio`, `contatos` (e leitura de `configuracoes` e `bairros_entrega`).
+
+- **Criar o funcionário:** aba Configurações → **Usuários do painel (funcionários)** → e-mail + senha → **Criar usuário**. Se o Supabase não deixar criar o login por ali, crie em Authentication → Users → Add user (marque Auto Confirm User) e toque em Criar usuário só com o e-mail.
+- **O que o funcionário vê:** só as abas Pedidos, Balcão, Cardápio e Contatos. Não vê Caixa, Compras, Equipe, Relatórios, Financeiro nem Configurações (nem o banco entrega esses dados para ele).
+- Os pedidos que ele lança aparecem para o administrador, e vice-versa: é a mesma tabela.
+- **Relatórios:** pedidos do site e do balcão não entram mais (foi retirado o card "Produtos mais vendidos", que vinha dos pedidos). O faturamento do Relatórios já vinha só do Caixa.
+- **Comanda:** a observação sai em destaque, num quadro "OBSERVAÇÃO", logo abaixo dos itens.
