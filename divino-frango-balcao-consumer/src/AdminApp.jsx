@@ -12,6 +12,10 @@ import Financeiro from "./Financeiro";
 import Caixa from "./Caixa";
 import Balcao from "./Balcao";
 import BalcaoConsumer from "./BalcaoConsumer";
+import UsuariosPainel from "./UsuariosPainel";
+
+// abas liberadas para o usuário "atendente" (funcionário)
+const ABAS_ATENDENTE = ["pedidos", "balcao", "cardapio", "contatos"];
 
 // Versão da aba Balcão: "consumer" (tabela única, estilo Consumer) ou "simples" (3 telas).
 // Para voltar à versão anterior, troque "consumer" por "simples" abaixo.
@@ -211,6 +215,7 @@ const mapPedidoFromDb = (r) => ({
   motivoCancelamento: r.motivo_cancelamento || undefined,
   numero: r.numero ?? r.numero_pedido ?? null,
   origem: r.origem || "site",
+  entregador: r.entregador || undefined,
 });
 
 // ---------- mensagens prontas para o WhatsApp do cliente ----------
@@ -393,6 +398,7 @@ export default function AdminApp() {
 
   // ---------- login ----------
   const [session, setSession] = useState(undefined); // undefined = verificando, null = deslogado, obj = logado
+  const [perfil, setPerfil] = useState(null); // null = verificando | "admin" | "atendente" | "nenhum"
   const [loginEmail, setLoginEmail] = useState("");
   const [loginSenha, setLoginSenha] = useState("");
   const [loginErro, setLoginErro] = useState("");
@@ -404,6 +410,26 @@ export default function AdminApp() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  // perfil do usuário logado: administrador (tudo), atendente (só pedidos, balcão, cardápio e contatos) ou nenhum
+  useEffect(() => {
+    if (!session) { setPerfil(null); return undefined; }
+    let ativo = true;
+    supabase.rpc("meu_perfil").then(({ data, error }) => {
+      if (!ativo) return;
+      if (error) {
+        // função ainda não existe no banco (SQL não rodado): mantém o comportamento antigo (administrador)
+        setPerfil(/PGRST202|42883|does not exist|could not find/i.test(`${error.code} ${error.message}`) ? "admin" : "atendente");
+      } else {
+        setPerfil(data || "admin");
+      }
+    });
+    return () => { ativo = false; };
+  }, [session]);
+
+  useEffect(() => {
+    if (perfil === "atendente" && !ABAS_ATENDENTE.includes(tab)) setTab("pedidos");
+  }, [perfil, tab]);
 
   const entrar = async () => {
     if (!loginEmail.trim() || !loginSenha) {
@@ -634,7 +660,16 @@ export default function AdminApp() {
     showToast(mensagem || `Pedido: ${LABEL_STATUS[status] || status}`);
     return true;
   };
-  const aceitarPedido = (id) => atualizarStatusPedido(id, "aceito");
+  // pedido do site aceito: vai direto para a aba Balcão, destacado, para acompanhar por lá
+  const [destaqueBalcao, setDestaqueBalcao] = useState(null);
+  const aceitarPedido = async (id) => {
+    const ok = await atualizarStatusPedido(id, "aceito");
+    if (ok) {
+      setDestaqueBalcao(id);
+      setTab("balcao");
+      setTimeout(() => setDestaqueBalcao((atual) => (atual === id ? null : atual)), 10000);
+    }
+  };
   const recusarPedido = (id) => atualizarStatusPedido(id, "recusado");
   const iniciarPreparoPedido = (id) => atualizarStatusPedido(id, "preparando");
   // "Saiu para entrega" (ou "Pronto para retirada"): grava o horário em pronto_em.
@@ -705,8 +740,12 @@ export default function AdminApp() {
   const imprimirPedido = (pedido) => {
     const janela = window.open("", "_blank", "width=380,height=600");
     if (!janela) return;
-    const itensHtml = pedido.itens
-      .map((it) => `<tr><td>${it.qtd}x ${it.nome}</td><td style="text-align:right">${fmt(it.preco * it.qtd)}</td></tr>`)
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const obsHtml = pedido.observacao
+      ? `<div class="linha"></div><div class="obs"><b>OBSERVAÇÃO:</b><br>${esc(pedido.observacao)}</div>`
+      : "";
+    const itensHtml = (pedido.itens || [])
+      .map((it) => `<tr><td>${it.qtd}x ${esc(it.nome)}</td><td style="text-align:right">${fmt(it.preco * it.qtd)}</td></tr>`)
       .join("");
     janela.document.write(`
       <html><head><title>Pedido</title>
@@ -717,21 +756,22 @@ export default function AdminApp() {
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         td { padding: 2px 0; }
         .total { font-weight: bold; font-size: 15px; }
+        .obs { border: 2px solid #000; padding: 6px; font-size: 14px; font-weight: bold; margin: 8px 0; white-space: pre-wrap; }
       </style></head>
       <body>
         <h2>Divino Frango</h2>
         <div style="text-align:center;font-size:12px;">${new Date(pedido.createdAt).toLocaleString("pt-BR")}</div>
         <div class="linha"></div>
-        <div><b>Cliente:</b> ${pedido.clienteNome}</div>
-        <div><b>Telefone:</b> ${pedido.clienteTelefone}</div>
+        <div><b>Cliente:</b> ${esc(pedido.clienteNome)}</div>
+        ${pedido.clienteTelefone ? `<div><b>Telefone:</b> ${pedido.clienteTelefone}</div>` : ""}
         <div><b>Tipo:</b> ${pedido.tipoEntrega === "entrega" ? "Entrega" : "Retirada"}</div>
-        ${pedido.tipoEntrega === "entrega" ? `<div><b>Endereço:</b> ${pedido.endereco || ""}${pedido.bairro ? " - " + pedido.bairro : ""}</div>` : ""}
-        ${pedido.referencia ? `<div><b>Referência:</b> ${pedido.referencia}</div>` : ""}
-        <div><b>Pagamento:</b> ${pedido.formaPagamento}</div>
+        ${pedido.tipoEntrega === "entrega" ? `<div><b>Endereço:</b> ${esc(pedido.endereco)}${pedido.bairro ? " - " + esc(pedido.bairro) : ""}</div>` : ""}
+        ${pedido.referencia ? `<div><b>Referência:</b> ${esc(pedido.referencia)}</div>` : ""}
+        <div><b>Pagamento:</b> ${pedido.formaPagamento || "A definir"}</div>
         ${pedido.formaPagamento === "Dinheiro" && pedido.precisaTroco && pedido.trocoPara != null ? `<div><b>Troco para:</b> ${fmt(pedido.trocoPara)} (levar ${fmt(pedido.trocoPara - pedido.total)})</div>` : ""}
-        ${pedido.observacao ? `<div><b>Obs:</b> ${pedido.observacao}</div>` : ""}
         <div class="linha"></div>
         <table>${itensHtml}</table>
+        ${obsHtml}
         <div class="linha"></div>
         <table>
           ${pedido.taxaEntrega > 0 ? `<tr><td>Taxa de entrega</td><td style="text-align:right">${fmt(pedido.taxaEntrega)}</td></tr>` : ""}
@@ -1347,8 +1387,6 @@ export default function AdminApp() {
 
   const hojeISO = new Date().toISOString().slice(0, 10);
 
-  const pedidosConcluidos = useMemo(() => pedidos.filter((p) => p.status === "concluido"), [pedidos]);
-
   const relatorio = useMemo(() => {
     // faturamento = só o que é lançado no Caixa (o fechamento do dia já inclui os pedidos do site)
     const balcaoHoje = vendasBalcaoRelatorio.filter((m) => (m.createdAt || "").slice(0, 10) === hojeISO).reduce((s, m) => s + m.valor, 0);
@@ -1365,20 +1403,9 @@ export default function AdminApp() {
       dias.push({ label, balcao: Number(balcao.toFixed(2)) });
     }
 
-    // produtos mais vendidos (baseado nos pedidos de delivery concluídos)
-    const contagem = {};
-    pedidosConcluidos.forEach((p) => {
-      (p.itens || []).forEach((it) => {
-        contagem[it.nome] = (contagem[it.nome] || 0) + Number(it.qtd || 0);
-      });
-    });
-    const maisVendidos = Object.entries(contagem)
-      .map(([nome, qtd]) => ({ nome, qtd }))
-      .sort((a, b) => b.qtd - a.qtd)
-      .slice(0, 6);
-
-    return { balcaoHoje, balcaoMes, dias, maisVendidos };
-  }, [pedidosConcluidos, vendasBalcaoRelatorio, hojeISO]);
+    // pedidos (site e balcão) não entram nos relatórios
+    return { balcaoHoje, balcaoMes, dias };
+  }, [vendasBalcaoRelatorio, hojeISO]);
 
   // ---------- configurações (taxa de entrega + horário de funcionamento) ----------
   const [taxaEntregaForm, setTaxaEntregaForm] = useState("0");
@@ -1550,6 +1577,24 @@ export default function AdminApp() {
         <Loader2 size={22} style={{ marginRight: 10 }} className="spin-loader" />
         Carregando…
         <style>{`.spin-loader { animation: spin-loader 1s linear infinite; } @keyframes spin-loader { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (perfil === null) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", color: C.textSoft, fontFamily: "'DM Sans', sans-serif" }}>
+        Carregando…
+      </div>
+    );
+  }
+
+  if (perfil === "nenhum") {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, color: C.text, fontFamily: "'DM Sans', sans-serif", padding: 24, textAlign: "center" }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>Este usuário não tem acesso ao painel.</div>
+        <div style={{ fontSize: 13, color: C.textSoft }}>Peça ao administrador para liberar o seu acesso.</div>
+        <button onClick={sair} style={{ ...btnPrimary }}>Sair</button>
       </div>
     );
   }
@@ -1758,7 +1803,7 @@ export default function AdminApp() {
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
-              onClick={() => setTab("config")}
+              onClick={() => perfil !== "atendente" && setTab("config")}
               style={{
                 background: lojaFechada ? C.redSoft : C.greenSoft, color: lojaFechada ? C.red : C.green,
                 border: `1px solid ${lojaFechada ? C.red : C.green}`, borderRadius: 999, padding: "7px 11px",
@@ -1768,6 +1813,7 @@ export default function AdminApp() {
             >
               {lojaFechada ? "🔴 FECHADA" : "🟢 ABERTA"}
             </button>
+            {perfil !== "atendente" && (
             <button
               onClick={() => setTab("config")}
               style={{ background: C.orangeSoft, border: "none", borderRadius: 10, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1775,6 +1821,7 @@ export default function AdminApp() {
             >
               <Settings size={18} color={C.orange} />
             </button>
+            )}
             <button
               onClick={sair}
               style={{ background: C.cardAlt, border: "none", borderRadius: 10, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1953,9 +2000,26 @@ export default function AdminApp() {
             codigoPedido={codigoPedido}
             labelStatus={LABEL_STATUS}
             atualizarStatusPedido={atualizarStatusPedido}
-            onPedidoCriado={(row) =>
-              setPedidos((prev) => (prev.some((p) => p.id === row.id) ? prev : [mapPedidoFromDb(row), ...prev]))
+            bairrosEntrega={bairrosEntrega}
+            funcionarios={funcionarios}
+            rotuloStatus={rotuloStatusPedido}
+            onPedidoAtualizado={(row) =>
+              setPedidos((prev) => prev.map((p) => (p.id === row.id ? mapPedidoFromDb(row) : p)))
             }
+            taxaPadrao={Number(taxaEntregaForm) || 0}
+            onPedidoCriado={(row) => {
+              const mapeado = mapPedidoFromDb(row);
+              setPedidos((prev) => (prev.some((p) => p.id === mapeado.id) ? prev : [mapeado, ...prev]));
+              return mapeado;
+            }}
+            imprimirPedido={imprimirPedido}
+            abrirWhatsAppPedido={(p, tipoAviso) => {
+              const tempo = mostrarTempoEntrega && Number(tempoEntregaMin) > 0
+                ? (tempoEntregaMin === tempoEntregaMax ? `${tempoEntregaMin} min` : `${tempoEntregaMin} a ${tempoEntregaMax} min`)
+                : null;
+              window.open(linkWhatsAppCliente(p, tipoAviso, tempo), "_blank", "noopener");
+            }}
+            destaqueId={destaqueBalcao}
           />
         )}
 
@@ -2424,25 +2488,6 @@ export default function AdminApp() {
                     <span style={{ fontSize: 11.5, color: C.textSoft, display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 8, height: 8, borderRadius: 4, background: C.green }} /> Vendas</span>
                   </div>
                 </Card>
-
-                <Card style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 12 }}>Produtos mais vendidos</div>
-                  {relatorio.maisVendidos.length === 0 ? (
-                    <div style={{ fontSize: 12.5, color: C.textFaint }}>Ainda sem pedidos concluídos suficientes.</div>
-                  ) : (
-                    <div style={{ height: Math.max(120, relatorio.maisVendidos.length * 32) }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={relatorio.maisVendidos} layout="vertical" margin={{ top: 0, right: 12, bottom: 0, left: 0 }}>
-                          <XAxis type="number" hide />
-                          <YAxis dataKey="nome" type="category" width={110} tick={{ fontSize: 11, fill: C.textSoft }} axisLine={false} tickLine={false} />
-                          <Tooltip formatter={(v) => `${v} vendidos`} contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, background: C.cardAlt, fontSize: 12, color: C.text }} />
-                          <Bar dataKey="qtd" fill={C.orange} radius={[0, 6, 6, 0]} barSize={16} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                  <div style={{ fontSize: 11, color: C.textFaint, marginTop: 8 }}>Baseado nos pedidos de delivery concluídos.</div>
-                </Card>
               </>
             )}
           </>
@@ -2806,6 +2851,16 @@ export default function AdminApp() {
             <button onClick={() => setTab("pedidos")} style={{ ...btnOutline, width: "100%" }}>
               <ClipboardList size={15} /> Voltar para Pedidos
             </button>
+            <UsuariosPainel
+              supabase={supabase}
+              C={C}
+              Card={Card}
+              FieldLabel={FieldLabel}
+              inputStyle={inputStyle}
+              btnPrimary={btnPrimary}
+              iconBtnStyle={iconBtnStyle}
+              showToast={showToast}
+            />
           </>
         )}
       </div>
@@ -2822,7 +2877,7 @@ export default function AdminApp() {
             { id: "financeiro", label: "Financeiro", icon: Banknote },
             { id: "cardapio", label: "Cardápio", icon: UtensilsCrossed },
             { id: "contatos", label: "Contatos", icon: Contact },
-          ].map(({ id, label, icon: Icon, badge }) => {
+          ].filter(({ id }) => perfil !== "atendente" || ABAS_ATENDENTE.includes(id)).map(({ id, label, icon: Icon, badge }) => {
             const ativo = tab === id;
             return (
               <button

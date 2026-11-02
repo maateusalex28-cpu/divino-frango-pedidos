@@ -347,3 +347,58 @@ A aba Balcão tem duas versões no código. Em `src/AdminApp.jsx`, a constante `
 - `"simples"`: a versão com três telas (Lançar pedido, Todos os pedidos, Reservas).
 
 Para voltar à versão anterior, troque `"consumer"` por `"simples"` e publique de novo. Ambas usam o mesmo SQL (`supabase/migracao-balcao-reservas.sql`).
+
+#### Novo pedido na versão Consumer
+
+O botão **Novo pedido (F2)** abre uma janela parecida com a do Consumer:
+
+- **Retirar no local:** só o nome (opcional) e os itens do cardápio. Pode marcar "Já entregue" para sair como Concluído.
+- **Entrega:** nome, telefone e **CEP**, que preenche rua e bairro sozinho (consulta o ViaCEP; precisa de internet). Depois é só informar número e complemento. A taxa vem do bairro cadastrado em Configurações (ou da taxa padrão) e pode ser editada na hora. Tem campo de troco para pagamento em dinheiro.
+- **Cliente:** ao digitar o nome, aparecem clientes que já fizeram pedido (site ou balcão) e os contatos cadastrados. Ao escolher um, o telefone e o último endereço de entrega são preenchidos. Cliente novo fica guardado no próprio pedido, sem cadastro separado.
+- Não existe campo de entregador (não há essa informação no banco hoje).
+
+#### Etapas do pedido e entregador (versão Consumer)
+
+- Ao clicar numa linha, o detalhe do pedido mostra a trilha de etapas: Novo, Aceito, Produção / Cozinha, Saiu para entrega (entrega) ou Pronto / Retirar (retirada) e Finalizado. O botão principal avança uma etapa por vez. Os status do banco são os mesmos de sempre: `pendente`, `aceito`, `preparando` (produção), `pronto` (saiu para entrega ou pronto para retirada), `concluido`.
+- **Entregador:** campo nos pedidos de entrega (no novo pedido e no detalhe), com sugestão dos nomes da equipe (funcionários com função de entregador/moto; se nenhum tiver, todos). Fica na coluna `pedidos.entregador`, criada por `supabase/migracao-balcao-reservas.sql` (rode de novo esse arquivo; é seguro repetir). A tabela mostra a coluna Entregador.
+
+#### Etapas e entregador (versão Consumer)
+
+O detalhe do pedido mostra a trilha de etapas: **Novo, Aceito, Produção / Cozinha, Pronto / Retirar (ou Saiu para entrega), Finalizado**. Elas usam os status que o sistema já tem: `pendente`, `aceito`, `preparando`, `pronto` e `concluido`. Em pedido de entrega, `pronto` significa "Saiu para entrega".
+
+Pedidos de entrega têm campo **Entregador** (nome digitado ou escolhido da equipe), gravado em `pedidos.entregador`. Rode de novo `supabase/migracao-balcao-reservas.sql` para criar essa coluna (pode rodar mais de uma vez).
+
+#### Ajustes da versão Consumer (rodada mais recente)
+
+- **Reservas:** o botão "Nova reserva" e as reservas foram retiradas da versão Consumer. A versão `"simples"` e a tabela `reservas` continuam no código.
+- **Retirar no local:** situação do pedido só com **Aguardando retirada** (status `pronto`) ou **Finalizado** (`concluido`). Telefone opcional (se preencher, precisa ter DDD + número).
+- **Entrega:** o pedido entra como **Em preparo** (`preparando`); depois **Saiu para entrega** (`pronto`) e **Finalizado** (`concluido`).
+- **CEP:** preenche rua e bairro e calcula a taxa pelo bairro cadastrado em `bairros_entrega` (nome igual ou parecido). Se o bairro não estiver cadastrado, usa a taxa padrão e avisa na tela. A taxa continua editável.
+- **Erros:** ao lançar ou salvar, a janela mostra em vermelho o que faltou ou o motivo do erro do banco (campo obrigatório, coluna que falta, sem permissão, valor recusado, sem internet).
+- **Editar pedido:** botão no detalhe (itens, cliente, endereço, taxa, pagamento, observação, entregador).
+- **Comanda:** botão **Imprimir comanda** no detalhe e opção "Imprimir comanda ao lançar", usando a impressão que já existia na aba Pedidos (com forma de pagamento e troco).
+- **Pedido do site:** ao tocar em **Aceitar** na aba Pedidos, o painel abre a aba Balcão no dia do pedido e destaca a linha por alguns segundos.
+- **Detalhe:** o botão **Cancelar pedido** (ou **Recusar**, se o pedido ainda é novo) ficou separado, no rodapé, e no lugar dele há o botão **Voltar**.
+- Rode de novo `supabase/migracao-balcao-reservas.sql` para criar a coluna `entregador`.
+
+#### Travas do banco e pedidos do balcão
+
+O banco tem três funções de gatilho na tabela `pedidos`: `validar_pedido` (exige telefone, confere itens e preços, recalcula taxa e total, força `status = 'pendente'`), `bloquear_pedido_loja_fechada` e `baixar_estoque_pedido`. Sem ajuste, elas recusam ou alteram o pedido lançado pelo painel (telefone vazio, bairro fora da lista, loja fechada, status trocado para `pendente`).
+
+**Rode no SQL Editor, depois do `migracao-balcao-reservas.sql`:** [`supabase/migracao-balcao-gatilhos.sql`](./supabase/migracao-balcao-gatilhos.sql). Ele libera só o pedido com `origem = 'balcao'` feito por usuário logado (e `eh_admin()`, se existir). Pedidos do site continuam com todas as validações. O baixar estoque continua funcionando para pedidos do balcão. Pode rodar mais de uma vez.
+
+#### Pagamento opcional e "Pix na entrega"
+
+- O pedido pode ser lançado **sem forma de pagamento**. Ele fica marcado como "Pagamento a definir" na tabela e na comanda.
+- No detalhe do pedido há botões para definir ou trocar a forma de pagamento depois (tocar na forma atual limpa o campo).
+- Em pedido de **entrega** há a opção **Pix na entrega**, por último. Ela não aparece em retirada.
+
+#### Usuário funcionário (atendente) e relatórios
+
+**Rode no SQL Editor do Supabase:** [`supabase/migracao-funcionario.sql`](./supabase/migracao-funcionario.sql) (depois de `migracao-seguranca.sql` e `migracao-balcao-reservas.sql`). Ele já inclui o que faz o `migracao-balcao-gatilhos.sql`; rodar os dois não tem problema. Cria a tabela `atendentes`, as funções `meu_perfil`, `registrar_atendente`, `listar_atendentes` e `remover_atendente`, e dá ao atendente acesso só a `pedidos`, `cardapio`, `contatos` (e leitura de `configuracoes` e `bairros_entrega`).
+
+- **Criar o funcionário:** aba Configurações → **Usuários do painel (funcionários)** → e-mail + senha → **Criar usuário**. Se o Supabase não deixar criar o login por ali, crie em Authentication → Users → Add user (marque Auto Confirm User) e toque em Criar usuário só com o e-mail.
+- **O que o funcionário vê:** só as abas Pedidos, Balcão, Cardápio e Contatos. Não vê Caixa, Compras, Equipe, Relatórios, Financeiro nem Configurações (nem o banco entrega esses dados para ele).
+- Os pedidos que ele lança aparecem para o administrador, e vice-versa: é a mesma tabela.
+- **Relatórios:** pedidos do site e do balcão não entram mais (foi retirado o card "Produtos mais vendidos", que vinha dos pedidos). O faturamento do Relatórios já vinha só do Caixa.
+- **Comanda:** a observação sai em destaque, num quadro "OBSERVAÇÃO", logo abaixo dos itens.
