@@ -787,6 +787,8 @@ export default function AdminApp() {
     `);
     janela.document.close();
     janela.focus();
+    // fecha a janelinha do cupom assim que a impressão termina (ou é cancelada)
+    janela.onafterprint = () => janela.close();
     janela.print();
   };
 
