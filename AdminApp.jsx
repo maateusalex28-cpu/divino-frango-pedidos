@@ -738,50 +738,77 @@ export default function AdminApp() {
   };
 
   const imprimirPedido = (pedido) => {
-    const janela = window.open("", "_blank", "width=380,height=600");
+    const janela = window.open("", "_blank", "width=420,height=700");
     if (!janela) return;
-    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const dinheiro = (n) => Number(n ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const itensHtml = (pedido.itens || []).map((it) => {
+      const qtd = Number(it.qtd ?? it.quantidade ?? 0);
+      const preco = Number(it.preco ?? it.valor ?? 0);
+      const totalItem = preco * qtd;
+      return `<tr class="item"><td colspan="2"><b>${esc(qtd)}x ${esc(it.nome)}</b></td></tr>
+        <tr class="preco-item"><td>${dinheiro(preco)} un.</td><td class="valor">${dinheiro(totalItem)}</td></tr>`;
+    }).join("");
     const obsHtml = pedido.observacao
-      ? `<div class="linha"></div><div class="obs"><b>OBSERVAÇÃO:</b><br>${esc(pedido.observacao)}</div>`
+      ? `<div class="linha"></div><div class="obs"><b>OBSERVAÇÃO</b><br>${esc(pedido.observacao).replace(/\n/g, "<br>")}</div>`
       : "";
-    const itensHtml = (pedido.itens || [])
-      .map((it) => `<tr><td>${it.qtd}x ${esc(it.nome)}</td><td style="text-align:right">${fmt(it.preco * it.qtd)}</td></tr>`)
-      .join("");
+    const dataHora = pedido.createdAt ? new Date(pedido.createdAt).toLocaleString("pt-BR") : new Date().toLocaleString("pt-BR");
+    const cod = codigoPedido(pedido);
     janela.document.write(`
-      <html><head><title>Pedido</title>
+      <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Pedido #${esc(cod)}</title>
       <style>
-        body { font-family: monospace; padding: 12px; width: 280px; }
-        h2 { text-align: center; margin: 0 0 4px; }
-        .linha { border-top: 1px dashed #000; margin: 8px 0; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        td { padding: 2px 0; }
-        .total { font-weight: bold; font-size: 15px; }
-        .obs { border: 2px solid #000; padding: 6px; font-size: 14px; font-weight: bold; margin: 8px 0; white-space: pre-wrap; }
+        @page { size: 58mm auto; margin: 2mm; }
+        * { box-sizing: border-box; }
+        html, body { width: 100%; margin: 0; padding: 0; }
+        body { font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 11px; line-height: 1.3; }
+        .cupom { width: 100%; max-width: 54mm; margin: 0 auto; overflow-wrap: anywhere; }
+        h2 { text-align: center; font-size: 18px; margin: 0 0 3px; font-weight: 800; }
+        .subtitulo { text-align: center; font-size: 10px; }
+        .pedido { text-align: center; font-size: 16px; font-weight: 800; margin: 5px 0; }
+        .linha { border-top: 1px dashed #000; margin: 7px 0; }
+        .campo { margin: 2px 0; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
+        td { padding: 2px 0; vertical-align: top; }
+        td:first-child { width: 68%; }
+        td.valor { width: 32%; text-align: right; white-space: nowrap; }
+        tr.item td { padding-top: 4px; }
+        tr.preco-item td { font-size: 10px; padding-top: 0; padding-bottom: 3px; }
+        .obs { border: 1px solid #000; padding: 5px; font-size: 11px; font-weight: 600; margin: 7px 0; }
+        .total { font-weight: 800; font-size: 16px; }
+        .total td { padding-top: 5px; }
+        .rodape { text-align: center; font-size: 9px; margin-top: 9px; }
+        @media screen { body { padding: 8px; background: #eee; } .cupom { background: #fff; padding: 8px; } }
+        @media print { body { padding: 0; } .cupom { max-width: none; } }
       </style></head>
-      <body>
-        <h2>Divino Frango</h2>
-        <div style="text-align:center;font-size:12px;">${new Date(pedido.createdAt).toLocaleString("pt-BR")}</div>
+      <body><main class="cupom">
+        <h2>DIVINO FRANGO</h2>
+        <div class="subtitulo">PEDIDO</div>
+        <div class="pedido">Nº ${esc(cod)}</div>
+        <div class="subtitulo">${esc(dataHora)}</div>
         <div class="linha"></div>
-        <div><b>Cliente:</b> ${esc(pedido.clienteNome)}</div>
-        ${pedido.clienteTelefone ? `<div><b>Telefone:</b> ${pedido.clienteTelefone}</div>` : ""}
-        <div><b>Tipo:</b> ${pedido.tipoEntrega === "entrega" ? "Entrega" : "Retirada"}</div>
-        ${pedido.tipoEntrega === "entrega" ? `<div><b>Endereço:</b> ${esc(pedido.endereco)}${pedido.bairro ? " - " + esc(pedido.bairro) : ""}</div>` : ""}
-        ${pedido.referencia ? `<div><b>Referência:</b> ${esc(pedido.referencia)}</div>` : ""}
-        <div><b>Pagamento:</b> ${pedido.formaPagamento || "A definir"}</div>
-        ${pedido.formaPagamento === "Dinheiro" && pedido.precisaTroco && pedido.trocoPara != null ? `<div><b>Troco para:</b> ${fmt(pedido.trocoPara)} (levar ${fmt(pedido.trocoPara - pedido.total)})</div>` : ""}
+        <div class="campo"><b>Cliente:</b> ${esc(pedido.clienteNome)}</div>
+        ${pedido.clienteTelefone ? `<div class="campo"><b>Telefone:</b> ${esc(pedido.clienteTelefone)}</div>` : ""}
+        <div class="campo"><b>Tipo:</b> ${pedido.tipoEntrega === "entrega" ? "ENTREGA" : "RETIRADA"}</div>
+        ${pedido.tipoEntrega === "entrega" ? `<div class="campo"><b>Endereço:</b> ${esc(pedido.endereco)}${pedido.bairro ? " - " + esc(pedido.bairro) : ""}</div>` : ""}
+        ${pedido.referencia ? `<div class="campo"><b>Referência:</b> ${esc(pedido.referencia)}</div>` : ""}
+        <div class="campo"><b>Pagamento:</b> ${esc(pedido.formaPagamento || "A definir")}</div>
+        ${pedido.formaPagamento === "Dinheiro" && pedido.precisaTroco && pedido.trocoPara != null ? `<div class="campo"><b>Troco para:</b> ${dinheiro(pedido.trocoPara)}<br><b>Levar:</b> ${dinheiro(pedido.trocoPara - Number(pedido.total || 0))}</div>` : ""}
         <div class="linha"></div>
+        <b>ITENS DO PEDIDO</b>
         <table>${itensHtml}</table>
         ${obsHtml}
         <div class="linha"></div>
         <table>
-          ${pedido.taxaEntrega > 0 ? `<tr><td>Taxa de entrega</td><td style="text-align:right">${fmt(pedido.taxaEntrega)}</td></tr>` : ""}
-          <tr class="total"><td>Total</td><td style="text-align:right">${fmt(pedido.total)}</td></tr>
+          ${pedido.subtotal != null ? `<tr><td>Subtotal</td><td class="valor">${dinheiro(pedido.subtotal)}</td></tr>` : ""}
+          ${Number(pedido.taxaEntrega) > 0 ? `<tr><td>Taxa de entrega</td><td class="valor">${dinheiro(pedido.taxaEntrega)}</td></tr>` : ""}
+          <tr class="total"><td>TOTAL</td><td class="valor">${dinheiro(pedido.total)}</td></tr>
         </table>
-      </body></html>
+        <div class="rodape">Obrigado pela preferência!</div>
+      </main></body></html>
     `);
     janela.document.close();
     janela.focus();
-    janela.print();
+    janela.onload = () => { janela.print(); };
   };
 
   // ---------- cardápio ----------
@@ -2845,12 +2872,7 @@ export default function AdminApp() {
               )}
             </Card>
 
-            <button onClick={salvarConfig} disabled={salvandoConfig} style={{ ...btnPrimary, width: "100%", marginBottom: 10, opacity: salvandoConfig ? 0.7 : 1 }}>
-              {salvandoConfig ? <Loader2 size={16} className="spin" /> : <Check size={16} />} {salvandoConfig ? "Salvando…" : "Salvar configurações"}
-            </button>
-            <button onClick={() => setTab("pedidos")} style={{ ...btnOutline, width: "100%" }}>
-              <ClipboardList size={15} /> Voltar para Pedidos
-            </button>
+            <div style={{ marginTop: 16 }}>
             <UsuariosPainel
               supabase={supabase}
               C={C}
@@ -2861,6 +2883,14 @@ export default function AdminApp() {
               iconBtnStyle={iconBtnStyle}
               showToast={showToast}
             />
+            </div>
+
+            <button onClick={salvarConfig} disabled={salvandoConfig} style={{ ...btnPrimary, width: "100%", marginBottom: 10, opacity: salvandoConfig ? 0.7 : 1 }}>
+              {salvandoConfig ? <Loader2 size={16} className="spin" /> : <Check size={16} />} {salvandoConfig ? "Salvando…" : "Salvar configurações"}
+            </button>
+            <button onClick={() => setTab("pedidos")} style={{ ...btnOutline, width: "100%" }}>
+              <ClipboardList size={15} /> Voltar para Pedidos
+            </button>
           </>
         )}
       </div>
