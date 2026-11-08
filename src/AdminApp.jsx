@@ -550,7 +550,7 @@ export default function AdminApp() {
         tocarAlerta();
         if (aceitarAutomaticoRef.current) {
           showToast("Novo pedido aceito automaticamente!");
-          atualizarStatusPedido(payload.new.id, "aceito");
+          atualizarStatusPedido(payload.new.id, "preparando", {}, "Pedido aceito e em preparo");
         } else {
           showToast("Novo pedido recebido!");
         }
@@ -665,7 +665,8 @@ export default function AdminApp() {
   // pedido do site aceito: vai direto para a aba Balcão, destacado, para acompanhar por lá
   const [destaqueBalcao, setDestaqueBalcao] = useState(null);
   const aceitarPedido = async (id) => {
-    const ok = await atualizarStatusPedido(id, "aceito");
+    // aceitar já coloca o pedido em preparo
+    const ok = await atualizarStatusPedido(id, "preparando", {}, "Pedido aceito e em preparo");
     if (ok) {
       setDestaqueBalcao(id);
       setTab("balcao");
