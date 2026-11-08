@@ -782,7 +782,7 @@ export default function AdminApp() {
           ${pedido.taxaEntrega > 0 ? `<tr><td>Taxa de entrega</td><td style="text-align:right">${fmt(pedido.taxaEntrega)}</td></tr>` : ""}
           <tr class="total"><td>Total</td><td style="text-align:right">${fmt(pedido.total)}</td></tr>
         </table>
-        <div class="fim">.<br>.<br>.<br>.<br>.</div>
+        <div class="fim">.<br>.<br>.</div>
       </body></html>
     `);
     janela.document.close();
