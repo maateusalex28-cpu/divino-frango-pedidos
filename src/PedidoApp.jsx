@@ -323,7 +323,7 @@ export default function PedidoApp() {
   const proximosDiasAbertos = useMemo(() => {
     if (!horarios) return [];
     const dias = [];
-    for (let i = 0; i < 8 && dias.length < 3; i++) {
+    for (let i = 0; i < 8 && dias.length < 2; i++) {
       const d = new Date();
       d.setDate(d.getDate() + i);
       const cfg = horarios[d.getDay()];
@@ -1222,11 +1222,11 @@ export default function PedidoApp() {
                 <div className="campo-grupo-titulo"><Bike size={17} /> Como você quer receber?</div>
 
                 <div className="segmento">
-                  <button onClick={() => setForm((f) => ({ ...f, tipoEntrega: "retirada" }))} className={form.tipoEntrega === "retirada" ? "is-active" : ""}>
-                    <Store size={17} /> Retirada
-                  </button>
                   <button onClick={() => setForm((f) => ({ ...f, tipoEntrega: "entrega" }))} className={form.tipoEntrega === "entrega" ? "is-active" : ""}>
                     <Bike size={17} /> Entrega
+                  </button>
+                  <button onClick={() => setForm((f) => ({ ...f, tipoEntrega: "retirada" }))} className={form.tipoEntrega === "retirada" ? "is-active" : ""}>
+                    <Store size={17} /> Retirada
                   </button>
                 </div>
                 {!statusLoja.aberta && proximosDiasAbertos.length > 0 && (
