@@ -131,7 +131,7 @@ export default function BalcaoConsumer({
         ehEntrega: p.tipoEntrega === "entrega", entregador: p.entregador || "",
         entrega: p.tipoEntrega === "entrega" ? "Entregar no endereço" : "Retirar no local",
         entregaSub: p.tipoEntrega === "entrega" ? [p.endereco, p.bairro].filter(Boolean).join(" - ") : "",
-        horario: p.horarioDesejado || "",
+        horario: p.horarioDesejado || "", pago: !!p.pago,
         pagamento: p.formaPagamento || "", total: p.total || 0,
         agendado: p.dataPedido && diaAbertura && p.dataPedido !== diaAbertura ? new Date(p.dataPedido + "T00:00").toLocaleDateString("pt-BR") : "",
       };
@@ -188,6 +188,7 @@ export default function BalcaoConsumer({
   const [entregadorNovo, setEntregadorNovo] = useState("");
   const [entregadorTxt, setEntregadorTxt] = useState("");
   const [horarioDesejado, setHorarioDesejado] = useState("");
+  const [pago, setPago] = useState(false);
 
   const nomesEntregadores = useMemo(() => {
     const todos = (funcionarios || []).filter((f) => f.nome);
@@ -313,7 +314,7 @@ export default function BalcaoConsumer({
     setEditandoId(null); setErroPedido(""); setBusca("");
     setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
     setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
-    setForma(""); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo(""); setHorarioDesejado("");
+    setForma(""); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo(""); setHorarioDesejado(""); setPago(false);
   };
   const abrirNovo = () => { limparPedido(); setModal("pedido"); };
 
@@ -330,6 +331,7 @@ export default function BalcaoConsumer({
     setObs(p.observacao || "");
     setEntregadorNovo(p.entregador || "");
     setHorarioDesejado(p.horarioDesejado || "");
+    setPago(!!p.pago);
     setCarrinho((p.itens || []).map((it, i) => ({
       id: it.id != null ? it.id : `sem-id-${i}`, semId: it.id == null,
       nome: it.nome, preco: Number(it.preco) || 0, qtd: Number(it.qtd) || 1,
@@ -391,6 +393,9 @@ export default function BalcaoConsumer({
       observacao: obs.trim() || null,
     };
     // horário que o cliente quer receber (só no painel); só mexe na coluna quando há horário ou quando ele foi apagado
+    // "pago": só mexe na coluna quando marcado ou quando a marcação foi removida
+    if (pago) campos.pago = true;
+    else if (original && original.pago) campos.pago = false;
     if (horarioDesejado) campos.horario_desejado = horarioDesejado;
     else if (original && original.horarioDesejado) campos.horario_desejado = null;
     if (tipo === "entrega") {
@@ -460,6 +465,19 @@ export default function BalcaoConsumer({
     }
     if (onPedidoAtualizado) onPedidoAtualizado(data);
     showToast(nova ? `Pagamento: ${nova}` : "Pagamento removido");
+  };
+
+  // marca/desmarca o pedido como pago (independe da forma de pagamento)
+  const salvarPago = async (p) => {
+    const novo = !p.pago;
+    const { data, error } = await supabase.from("pedidos").update({ pago: novo }).eq("id", p.id).select().single();
+    if (error) {
+      console.error(error);
+      showToast(`Erro ao salvar: ${descreverErroBanco(error)}`);
+      return;
+    }
+    if (onPedidoAtualizado) onPedidoAtualizado(data);
+    showToast(novo ? "Pedido marcado como pago" : "Pago desmarcado");
   };
 
   const salvarEntregador = async (p) => {
@@ -541,6 +559,7 @@ export default function BalcaoConsumer({
                   <td style={{ ...td, color: l.entregador ? C.text : C.textFaint }}>{l.ehEntrega ? l.entregador || "Selecione…" : ""}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>
                     {fmt(l.total)}
+                    {l.pago && <div style={{ fontSize: 11, color: C.green, fontWeight: 800 }}>✓ Pago</div>}
                     {l.pagamento
                       ? <div style={{ fontSize: 11, color: C.textSoft, fontWeight: 500 }}>{l.pagamento}</div>
                       : l.grupo !== "cancelado" && <div style={{ fontSize: 11, color: C.orangeText, fontWeight: 700 }}>Pagamento a definir</div>}
@@ -671,6 +690,7 @@ export default function BalcaoConsumer({
             {formasDisponiveis(tipo === "entrega").map((f) => (
               <button key={f} onClick={() => setForma(forma === f ? "" : f)} style={chip(forma === f)}>{f}</button>
             ))}
+            <button onClick={() => setPago(!pago)} style={{ ...chip(pago), ...(pago ? { borderColor: C.green, background: C.greenSoft, color: C.green } : {}) }}>✓ Pago</button>
           </div>
           {!forma && <div style={{ fontSize: 11.5, color: C.textSoft, marginBottom: 10 }}>Sem forma de pagamento por enquanto. Você define no detalhe do pedido quando o cliente responder.</div>}
           {forma === "Dinheiro" && (
@@ -792,6 +812,7 @@ export default function BalcaoConsumer({
                   {formasDisponiveis(ehEntrega).map((f) => (
                     <button key={f} onClick={() => salvarPagamento(p, p.formaPagamento === f ? "" : f)} style={chip(p.formaPagamento === f)}>{f}</button>
                   ))}
+                  <button onClick={() => salvarPago(p)} style={{ ...chip(!!p.pago), ...(p.pago ? { borderColor: C.green, background: C.greenSoft, color: C.green } : {}) }}>✓ Pago</button>
                 </div>
                 {!p.formaPagamento && <div style={{ fontSize: 11.5, color: C.orangeText, marginTop: 6 }}>Ainda não informada. Toque numa opção para definir.</div>}
               </div>

@@ -209,6 +209,7 @@ const mapPedidoFromDb = (r) => ({
   status: r.status,
   createdAt: r.created_at,
   dataPedido: r.data_pedido || undefined,
+  pago: !!r.pago,
   horarioDesejado: r.horario_desejado ? String(r.horario_desejado).slice(0, 5) : undefined,
   prontoEm: r.pronto_em || undefined,
   concluidoEm: r.concluido_em || undefined,
@@ -774,7 +775,7 @@ export default function AdminApp() {
         ${pedido.tipoEntrega === "entrega" ? `<div><b>Endereço:</b> ${esc(pedido.endereco)}${pedido.bairro ? " - " + esc(pedido.bairro) : ""}</div>` : ""}
         ${pedido.referencia ? `<div><b>Referência:</b> ${esc(pedido.referencia)}</div>` : ""}
         ${pedido.horarioDesejado ? `<div><b>Horário:</b> ${pedido.horarioDesejado}</div>` : ""}
-        <div><b>Pagamento:</b> ${pedido.formaPagamento || "A definir"}</div>
+        <div><b>Pagamento:</b> ${pedido.formaPagamento || "A definir"}${pedido.pago ? " - PAGO" : ""}</div>
         ${pedido.formaPagamento === "Dinheiro" && pedido.precisaTroco && pedido.trocoPara != null ? `<div><b>Troco para:</b> ${fmt(pedido.trocoPara)} (levar ${fmt(pedido.trocoPara - pedido.total)})</div>` : ""}
         <div class="linha"></div>
         <table>${itensHtml}</table>
