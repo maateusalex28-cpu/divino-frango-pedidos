@@ -1911,7 +1911,17 @@ export default function AdminApp() {
                       }
                     />
                   )}
-                  {pedidosAtivos.map((p) => renderPedidoCard(p))}
+                  {[
+                    { titulo: "Entregas", lista: pedidosAtivos.filter((p) => p.tipoEntrega === "entrega") },
+                    { titulo: "Retiradas", lista: pedidosAtivos.filter((p) => p.tipoEntrega !== "entrega") },
+                  ].map((g) => g.lista.length > 0 && (
+                    <div key={g.titulo} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: C.textSoft, letterSpacing: 0.4, textTransform: "uppercase", marginTop: 4 }}>
+                        {g.titulo} ({g.lista.length})
+                      </div>
+                      {g.lista.map((p) => renderPedidoCard(p))}
+                    </div>
+                  ))}
                 </div>
               </>
             )}
