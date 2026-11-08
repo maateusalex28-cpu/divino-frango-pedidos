@@ -750,13 +750,17 @@ export default function AdminApp() {
     janela.document.write(`
       <html><head><title>Pedido</title>
       <style>
-        body { font-family: monospace; padding: 12px; width: 280px; }
-        h2 { text-align: center; margin: 0 0 4px; }
-        .linha { border-top: 1px dashed #000; margin: 8px 0; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        td { padding: 2px 0; }
-        .total { font-weight: bold; font-size: 15px; }
-        .obs { border: 2px solid #000; padding: 6px; font-size: 14px; font-weight: bold; margin: 8px 0; white-space: pre-wrap; }
+        @page { size: 58mm auto; margin: 0; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        body { font-family: monospace; font-size: 12px; width: 46mm; padding: 2mm 0 6mm 1mm; word-break: break-word; }
+        h2 { text-align: center; margin: 0 0 4px; font-size: 16px; }
+        .linha { border-top: 1px dashed #000; margin: 6px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: auto; }
+        td { padding: 2px 0; vertical-align: top; }
+        td:last-child { text-align: right; white-space: nowrap; padding-left: 4px; }
+        .total { font-weight: bold; font-size: 14px; }
+        .obs { border: 2px solid #000; padding: 4px; font-size: 12px; font-weight: bold; margin: 6px 0; white-space: pre-wrap; }
       </style></head>
       <body>
         <h2>Divino Frango</h2>
