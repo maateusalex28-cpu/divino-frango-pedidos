@@ -131,6 +131,7 @@ export default function BalcaoConsumer({
         ehEntrega: p.tipoEntrega === "entrega", entregador: p.entregador || "",
         entrega: p.tipoEntrega === "entrega" ? "Entregar no endereço" : "Retirar no local",
         entregaSub: p.tipoEntrega === "entrega" ? [p.endereco, p.bairro].filter(Boolean).join(" - ") : "",
+        horario: p.horarioDesejado || "",
         pagamento: p.formaPagamento || "", total: p.total || 0,
         agendado: p.dataPedido && diaAbertura && p.dataPedido !== diaAbertura ? new Date(p.dataPedido + "T00:00").toLocaleDateString("pt-BR") : "",
       };
@@ -186,6 +187,7 @@ export default function BalcaoConsumer({
   const [mostrarSug, setMostrarSug] = useState(false);
   const [entregadorNovo, setEntregadorNovo] = useState("");
   const [entregadorTxt, setEntregadorTxt] = useState("");
+  const [horarioDesejado, setHorarioDesejado] = useState("");
 
   const nomesEntregadores = useMemo(() => {
     const todos = (funcionarios || []).filter((f) => f.nome);
@@ -311,7 +313,7 @@ export default function BalcaoConsumer({
     setEditandoId(null); setErroPedido(""); setBusca("");
     setCarrinho([]); setNome(""); setTelefone(""); setCep(""); setRua(""); setNumeroEnd(""); setCompl("");
     setBairro(""); setReferencia(""); setTaxaTxt(""); setTaxaManual(false); setTrocoPara(""); setObs("");
-    setForma(""); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo("");
+    setForma(""); setTipo("retirada"); setStatusRetirada("aguardando"); setEntregadorNovo(""); setHorarioDesejado("");
   };
   const abrirNovo = () => { limparPedido(); setModal("pedido"); };
 
@@ -327,6 +329,7 @@ export default function BalcaoConsumer({
     setTrocoPara(p.precisaTroco && p.trocoPara != null ? String(p.trocoPara).replace(".", ",") : "");
     setObs(p.observacao || "");
     setEntregadorNovo(p.entregador || "");
+    setHorarioDesejado(p.horarioDesejado || "");
     setCarrinho((p.itens || []).map((it, i) => ({
       id: it.id != null ? it.id : `sem-id-${i}`, semId: it.id == null,
       nome: it.nome, preco: Number(it.preco) || 0, qtd: Number(it.qtd) || 1,
@@ -387,6 +390,9 @@ export default function BalcaoConsumer({
       total: totalPedido,
       observacao: obs.trim() || null,
     };
+    // horário que o cliente quer receber (só no painel); só mexe na coluna quando há horário ou quando ele foi apagado
+    if (horarioDesejado) campos.horario_desejado = horarioDesejado;
+    else if (original && original.horarioDesejado) campos.horario_desejado = null;
     if (tipo === "entrega") {
       Object.assign(campos, { cep: cep || null, endereco: enderecoCompleto, bairro: bairro.trim() || null, referencia: referencia.trim() || null });
       if (entregadorNovo.trim()) campos.entregador = entregadorNovo.trim();
@@ -498,7 +504,7 @@ export default function BalcaoConsumer({
       </div>
 
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 940, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: 1020, borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th style={th}>Pedido</th>
@@ -508,6 +514,7 @@ export default function BalcaoConsumer({
               <th style={th}>Origem</th>
               <th style={th}>Status</th>
               <th style={th}>Entrega</th>
+              <th style={th}>Horário</th>
               <th style={th}>Entregador</th>
               <th style={{ ...th, textAlign: "right" }}>Total</th>
               <th style={th}>Agendado para</th>
@@ -530,6 +537,7 @@ export default function BalcaoConsumer({
                     <div style={{ fontWeight: 700 }}>{l.entrega}</div>
                     {l.entregaSub && <div style={{ fontSize: 11.5, color: C.textSoft, maxWidth: 220 }}>{l.entregaSub}</div>}
                   </td>
+                  <td style={{ ...td, fontWeight: 800, whiteSpace: "nowrap", color: l.horario ? C.orangeText : C.textFaint }}>{l.horario || "—"}</td>
                   <td style={{ ...td, color: l.entregador ? C.text : C.textFaint }}>{l.ehEntrega ? l.entregador || "Selecione…" : ""}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>
                     {fmt(l.total)}
@@ -618,6 +626,9 @@ export default function BalcaoConsumer({
               <input list="entregadores-balcao" value={entregadorNovo} onChange={(e) => setEntregadorNovo(e.target.value)} placeholder="Selecione ou digite o nome" style={{ ...inputStyle, marginBottom: 12 }} />
             </>
           )}
+
+          <FieldLabel>Horário que o cliente quer receber (opcional)</FieldLabel>
+          <input type="time" value={horarioDesejado} onChange={(e) => setHorarioDesejado(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
 
           <FieldLabel>Itens</FieldLabel>
           <div style={{ position: "relative", marginBottom: 8 }}>
@@ -746,6 +757,7 @@ export default function BalcaoConsumer({
               {p.referencia && <div>Referência: {p.referencia}</div>}
               {p.clienteTelefone && <div>Telefone: {p.clienteTelefone}</div>}
               <div>Pagamento: {p.formaPagamento || "a definir"}{p.precisaTroco && p.trocoPara != null ? ` (troco para ${fmt(p.trocoPara)})` : ""}</div>
+              {p.horarioDesejado && <div>Horário desejado: <b style={{ color: C.orangeText }}>{p.horarioDesejado}</b></div>}
               {p.observacao && <div>Obs.: {p.observacao}</div>}
               {p.motivoCancelamento && <div style={{ color: C.red }}>Motivo: {p.motivoCancelamento}</div>}
             </div>

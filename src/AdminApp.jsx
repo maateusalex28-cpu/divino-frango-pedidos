@@ -209,6 +209,7 @@ const mapPedidoFromDb = (r) => ({
   status: r.status,
   createdAt: r.created_at,
   dataPedido: r.data_pedido || undefined,
+  horarioDesejado: r.horario_desejado ? String(r.horario_desejado).slice(0, 5) : undefined,
   prontoEm: r.pronto_em || undefined,
   concluidoEm: r.concluido_em || undefined,
   canceladoEm: r.cancelado_em || undefined,
@@ -772,6 +773,7 @@ export default function AdminApp() {
         <div><b>Tipo:</b> ${pedido.tipoEntrega === "entrega" ? "Entrega" : "Retirada"}</div>
         ${pedido.tipoEntrega === "entrega" ? `<div><b>Endereço:</b> ${esc(pedido.endereco)}${pedido.bairro ? " - " + esc(pedido.bairro) : ""}</div>` : ""}
         ${pedido.referencia ? `<div><b>Referência:</b> ${esc(pedido.referencia)}</div>` : ""}
+        ${pedido.horarioDesejado ? `<div><b>Horário:</b> ${pedido.horarioDesejado}</div>` : ""}
         <div><b>Pagamento:</b> ${pedido.formaPagamento || "A definir"}</div>
         ${pedido.formaPagamento === "Dinheiro" && pedido.precisaTroco && pedido.trocoPara != null ? `<div><b>Troco para:</b> ${fmt(pedido.trocoPara)} (levar ${fmt(pedido.trocoPara - pedido.total)})</div>` : ""}
         <div class="linha"></div>
@@ -1804,7 +1806,7 @@ export default function AdminApp() {
       `}</style>
 
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: "16px 20px", position: "sticky", top: 0, zIndex: 20 }}>
-        <div style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ maxWidth: tab === "balcao" ? 1180 : 640, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <img src={LOGO_URL} alt="Divino Frango" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 9 }} />
             <div className="display" style={{ fontSize: 16, fontWeight: 700 }}>Painel de Pedidos</div>
@@ -1841,7 +1843,7 @@ export default function AdminApp() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 0" }}>
+      <div style={{ maxWidth: tab === "balcao" ? 1180 : 640, margin: "0 auto", padding: "16px 16px 0" }}>
         {!somAtivo && (
           <button
             onClick={ativarSom}
