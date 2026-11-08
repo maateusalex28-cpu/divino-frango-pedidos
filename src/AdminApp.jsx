@@ -760,6 +760,7 @@ export default function AdminApp() {
         td { padding: 2px 0; vertical-align: top; }
         td:last-child { text-align: right; white-space: nowrap; padding-left: 4px; }
         .total { font-weight: bold; font-size: 14px; }
+        .fim { height: 20mm; color: #fff; font-size: 1px; line-height: 1px; }
         .obs { border: 2px solid #000; padding: 4px; font-size: 12px; font-weight: bold; margin: 6px 0; white-space: pre-wrap; }
       </style></head>
       <body>
@@ -781,6 +782,7 @@ export default function AdminApp() {
           ${pedido.taxaEntrega > 0 ? `<tr><td>Taxa de entrega</td><td style="text-align:right">${fmt(pedido.taxaEntrega)}</td></tr>` : ""}
           <tr class="total"><td>Total</td><td style="text-align:right">${fmt(pedido.total)}</td></tr>
         </table>
+        <div class="fim">.</div>
       </body></html>
     `);
     janela.document.close();
