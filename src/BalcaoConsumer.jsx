@@ -141,7 +141,8 @@ export default function BalcaoConsumer({
       .filter((l) => filtroOrigem === "todos" || l.origem === filtroOrigem)
       .filter((l) => filtroStatus === "todos" || l.grupo === filtroStatus)
       .filter((l) => !termo || semAcento(`${l.cod} ${l.cliente} ${l.entregaSub}`).includes(termo))
-      .sort((a, b) => String(b.abertura).localeCompare(String(a.abertura)));
+      // entregas primeiro, retiradas depois; dentro de cada grupo, o mais recente em cima
+      .sort((a, b) => (a.ehEntrega === b.ehEntrega ? 0 : a.ehEntrega ? -1 : 1) || String(b.abertura).localeCompare(String(a.abertura)));
   }, [pedidos, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO]);
 
   const validos = linhas.filter((l) => l.grupo !== "cancelado");
@@ -539,10 +540,20 @@ export default function BalcaoConsumer({
             </tr>
           </thead>
           <tbody>
-            {linhas.map((l) => {
+            {linhas.map((l, idx) => {
               const cor = corStatus(l.grupo);
+              const primeiroDoGrupo = idx === 0 || linhas[idx - 1].ehEntrega !== l.ehEntrega;
+              const qtdGrupo = linhas.filter((x) => x.ehEntrega === l.ehEntrega).length;
               return (
-                <tr key={l.key} onClick={() => setDetalheKey(l.key)} style={{ cursor: "pointer", background: destaqueId && l.ref.id === destaqueId ? C.orangeSoft : "transparent" }}>
+                <React.Fragment key={l.key}>
+                {primeiroDoGrupo && (
+                  <tr>
+                    <td colSpan={11} style={{ padding: "8px 10px", fontSize: 11.5, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: C.textSoft, background: C.borderSoft }}>
+                      {l.ehEntrega ? "Entregas" : "Retiradas"} ({qtdGrupo})
+                    </td>
+                  </tr>
+                )}
+                <tr onClick={() => setDetalheKey(l.key)} style={{ cursor: "pointer", background: destaqueId && l.ref.id === destaqueId ? C.orangeSoft : "transparent" }}>
                   <td style={{ ...td, fontWeight: 800 }}>{l.cod}</td>
                   <td style={td}>{fmtAbertura(l.abertura)}</td>
                   <td style={{ ...td, fontWeight: 700, color: l.andamento && l.duracao > 3600000 ? C.red : C.text }}>{l.duracao == null ? "—" : fmtDuracao(l.duracao)}</td>
@@ -566,6 +577,7 @@ export default function BalcaoConsumer({
                   </td>
                   <td style={td}>{l.agendado}</td>
                 </tr>
+                </React.Fragment>
               );
             })}
           </tbody>
