@@ -1913,8 +1913,9 @@ export default function AdminApp() {
                     />
                   )}
                   {[
-                    { titulo: "Entregas", lista: pedidosAtivos.filter((p) => p.tipoEntrega === "entrega") },
-                    { titulo: "Retiradas", lista: pedidosAtivos.filter((p) => p.tipoEntrega !== "entrega") },
+                    { titulo: "Aguardando aceite", lista: pedidosAtivos.filter((p) => p.status === "pendente") },
+                    { titulo: "Entregas", lista: pedidosAtivos.filter((p) => p.status !== "pendente" && p.tipoEntrega === "entrega") },
+                    { titulo: "Retiradas", lista: pedidosAtivos.filter((p) => p.status !== "pendente" && p.tipoEntrega !== "entrega") },
                   ].map((g) => g.lista.length > 0 && (
                     <div key={g.titulo} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       <div style={{ fontSize: 12, fontWeight: 800, color: C.textSoft, letterSpacing: 0.4, textTransform: "uppercase", marginTop: 4 }}>

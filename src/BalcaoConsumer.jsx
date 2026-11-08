@@ -29,6 +29,7 @@ const fmtDuracao = (ms) => {
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}`;
 };
 
+const ordemGrupo = (l) => (l.novo ? 0 : l.ehEntrega ? 1 : 2);
 const grupoPedido = (s) => (s === "concluido" ? "finalizado" : s === "cancelado" || s === "recusado" ? "cancelado" : "andamento");
 
 const rotuloPedido = (p) => {
@@ -128,7 +129,7 @@ export default function BalcaoConsumer({
         duracao: grupo === "andamento" ? agora - new Date(p.createdAt).getTime() : fim ? new Date(fim).getTime() - new Date(p.createdAt).getTime() : null,
         andamento: grupo === "andamento",
         cliente: p.clienteNome, origem: p.origem || "site", grupo, statusTxt: rotuloPedido(p),
-        ehEntrega: p.tipoEntrega === "entrega", entregador: p.entregador || "",
+        novo: p.status === "pendente", ehEntrega: p.tipoEntrega === "entrega", entregador: p.entregador || "",
         entrega: p.tipoEntrega === "entrega" ? "Entregar no endereço" : "Retirar no local",
         entregaSub: p.tipoEntrega === "entrega" ? [p.endereco, p.bairro].filter(Boolean).join(" - ") : "",
         horario: p.horarioDesejado || "", pago: !!p.pago,
@@ -141,8 +142,8 @@ export default function BalcaoConsumer({
       .filter((l) => filtroOrigem === "todos" || l.origem === filtroOrigem)
       .filter((l) => filtroStatus === "todos" || l.grupo === filtroStatus)
       .filter((l) => !termo || semAcento(`${l.cod} ${l.cliente} ${l.entregaSub}`).includes(termo))
-      // entregas primeiro, retiradas depois; dentro de cada grupo, o mais recente em cima
-      .sort((a, b) => (a.ehEntrega === b.ehEntrega ? 0 : a.ehEntrega ? -1 : 1) || String(b.abertura).localeCompare(String(a.abertura)));
+      // pedidos novos (aguardando aceite) primeiro, depois entregas, depois retiradas; dentro de cada grupo, o mais recente em cima
+      .sort((a, b) => (ordemGrupo(a) - ordemGrupo(b)) || String(b.abertura).localeCompare(String(a.abertura)));
   }, [pedidos, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO]);
 
   const validos = linhas.filter((l) => l.grupo !== "cancelado");
@@ -542,14 +543,14 @@ export default function BalcaoConsumer({
           <tbody>
             {linhas.map((l, idx) => {
               const cor = corStatus(l.grupo);
-              const primeiroDoGrupo = idx === 0 || linhas[idx - 1].ehEntrega !== l.ehEntrega;
-              const qtdGrupo = linhas.filter((x) => x.ehEntrega === l.ehEntrega).length;
+              const primeiroDoGrupo = idx === 0 || ordemGrupo(linhas[idx - 1]) !== ordemGrupo(l);
+              const qtdGrupo = linhas.filter((x) => ordemGrupo(x) === ordemGrupo(l)).length;
               return (
                 <React.Fragment key={l.key}>
                 {primeiroDoGrupo && (
                   <tr>
                     <td colSpan={11} style={{ padding: "8px 10px", fontSize: 11.5, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: C.textSoft, background: C.borderSoft }}>
-                      {l.ehEntrega ? "Entregas" : "Retiradas"} ({qtdGrupo})
+                      {l.novo ? "Aguardando aceite" : l.ehEntrega ? "Entregas" : "Retiradas"} ({qtdGrupo})
                     </td>
                   </tr>
                 )}
