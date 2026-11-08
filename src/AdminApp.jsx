@@ -740,9 +740,21 @@ export default function AdminApp() {
     showToast(novo ? "Campo de cupom visível no site" : "Campo de cupom ocultado do site");
   };
 
-  const imprimirPedido = (pedido) => {
-    const janela = window.open("", "_blank", "width=380,height=600");
-    if (!janela) return;
+  // imprime aqui. silencioso = imprime por um quadro invisível (usado quando o pedido vem da fila,
+  // sem clique do usuário, caso em que o navegador bloquearia uma janela nova)
+  const imprimirLocal = (pedido, silencioso = false) => {
+    let janela;
+    let quadro = null;
+    if (silencioso) {
+      quadro = document.createElement("iframe");
+      quadro.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+      document.body.appendChild(quadro);
+      janela = quadro.contentWindow;
+    } else {
+      janela = window.open("", "_blank", "width=380,height=600");
+      if (!janela) return;
+    }
+    const fechar = () => { if (quadro) quadro.remove(); else janela.close(); };
     const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const obsHtml = pedido.observacao
       ? `<div class="linha"></div><div class="obs"><b>OBSERVAÇÃO:</b><br>${esc(pedido.observacao)}</div>`
@@ -792,9 +804,81 @@ export default function AdminApp() {
     janela.document.close();
     janela.focus();
     // fecha a janelinha do cupom assim que a impressão termina (ou é cancelada)
-    janela.onafterprint = () => janela.close();
-    janela.print();
+    janela.onafterprint = fechar;
+    if (quadro) {
+      setTimeout(() => {
+        try { janela.focus(); janela.print(); } catch (e) { console.error(e); }
+        setTimeout(fechar, 60000);
+      }, 300);
+    } else {
+      janela.print();
+    }
   };
+
+  // ---------- fila de impressão (celular manda, o computador da loja imprime) ----------
+  const [impressoraAqui, setImpressoraAqui] = useState(() => {
+    try { return localStorage.getItem("df_impressora_aqui") === "1"; } catch { return false; }
+  });
+  const impressoraAquiRef = useRef(impressoraAqui);
+  const pedidosRef = useRef(pedidos);
+  const imprimirLocalRef = useRef(imprimirLocal);
+  const ultimoEnvioImpressao = useRef({});
+  impressoraAquiRef.current = impressoraAqui;
+  pedidosRef.current = pedidos;
+  imprimirLocalRef.current = imprimirLocal;
+
+  const alternarImpressoraAqui = () => {
+    const novo = !impressoraAqui;
+    setImpressoraAqui(novo);
+    try { localStorage.setItem("df_impressora_aqui", novo ? "1" : "0"); } catch { /* sem armazenamento */ }
+    showToast(novo ? "Este aparelho vai imprimir os pedidos enviados" : "Este aparelho não imprime mais pedidos enviados");
+  };
+
+  // botão "Imprimir comanda": se este aparelho é o da impressora, imprime; senão manda para a fila
+  const imprimirPedido = async (pedido) => {
+    if (impressoraAqui) { imprimirLocal(pedido); return; }
+    const agoraMs = Date.now();
+    if (agoraMs - (ultimoEnvioImpressao.current[pedido.id] || 0) < 5000) return; // evita toque duplo
+    ultimoEnvioImpressao.current[pedido.id] = agoraMs;
+    const { error } = await supabase.from("fila_impressao").insert({ pedido_id: pedido.id });
+    if (error) {
+      console.error(error);
+      delete ultimoEnvioImpressao.current[pedido.id];
+      showToast(`Não foi possível enviar para a impressora: ${error.message}`);
+      return;
+    }
+    showToast("Comanda enviada para a impressora");
+  };
+
+  // aparelho da impressora: imprime o que chegar na fila (e o que ficou esperando nos últimos 15 min)
+  useEffect(() => {
+    if (!session || !impressoraAqui) return;
+    let ativo = true;
+    const processar = async (linha) => {
+      if (!impressoraAquiRef.current) return;
+      // "pega" a linha: só um aparelho imprime cada pedido
+      const { data: pegou, error } = await supabase
+        .from("fila_impressao").update({ impresso_em: new Date().toISOString() })
+        .eq("id", linha.id).is("impresso_em", null).select();
+      if (error || !pegou || pegou.length === 0 || !ativo) return;
+      let ped = pedidosRef.current.find((x) => x.id === linha.pedido_id);
+      if (!ped) {
+        const { data } = await supabase.from("pedidos").select("*").eq("id", linha.pedido_id).maybeSingle();
+        if (data) ped = mapPedidoFromDb(data);
+      }
+      if (ped) imprimirLocalRef.current(ped, true);
+    };
+    (async () => {
+      const desde = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const { data } = await supabase.from("fila_impressao").select("*").is("impresso_em", null).gte("created_at", desde).order("created_at", { ascending: true });
+      for (const linha of data || []) { if (!ativo) break; await processar(linha); }
+    })();
+    const canal = supabase
+      .channel("fila-impressao")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "fila_impressao" }, (payload) => processar(payload.new))
+      .subscribe();
+    return () => { ativo = false; supabase.removeChannel(canal); };
+  }, [session, impressoraAqui]);
 
   // ---------- cardápio ----------
   const [formCardapio, setFormCardapio] = useState({ nome: "", descricao: "", preco: "", categoria: "", estoque: "" });
@@ -1895,6 +1979,18 @@ export default function AdminApp() {
                   }}
                 >
                   {aceitarAutomatico ? <Check size={15} /> : <X size={15} />} Aceitar pedidos novos automaticamente: {aceitarAutomatico ? "Ligado" : "Desligado"}
+                </button>
+                <button
+                  onClick={alternarImpressoraAqui}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    background: impressoraAqui ? C.greenSoft : C.cardAlt,
+                    color: impressoraAqui ? C.green : C.textSoft,
+                    border: `1px solid ${impressoraAqui ? C.green : C.border}`, borderRadius: 12,
+                    padding: "10px 14px", fontSize: 13, fontWeight: 700, marginBottom: 14,
+                  }}
+                >
+                  {impressoraAqui ? <Check size={15} /> : <X size={15} />} Este aparelho imprime os pedidos enviados: {impressoraAqui ? "Ligado" : "Desligado"}
                 </button>
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                   <MiniStat label="Pendentes" value={String(pedidosPendentes.length)} />
