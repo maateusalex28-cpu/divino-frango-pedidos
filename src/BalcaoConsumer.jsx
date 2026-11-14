@@ -93,7 +93,7 @@ function Modal({ C, titulo, onClose, largura = 640, children }) {
 export default function BalcaoConsumer({
   supabase, C, fmt, FieldLabel, EmptyState, inputStyle, btnPrimary, btnOutline, iconBtnStyle,
   showToast, dataLocalISO, cardapio, pedidos, codigoPedido, onPedidoCriado, onPedidoAtualizado, atualizarStatusPedido,
-  bairrosEntrega, taxaPadrao, funcionarios, imprimirPedido, abrirWhatsAppPedido, destaqueId,
+  bairrosEntrega, taxaPadrao, funcionarios, imprimirPedido, impressoraAqui, alternarImpressoraAqui, abrirWhatsAppPedido, destaqueId,
 }) {
   const hoje = dataLocalISO();
   const [dia, setDia] = useState(hoje);
@@ -508,6 +508,18 @@ export default function BalcaoConsumer({
       </datalist>
 
       <button onClick={abrirNovo} style={{ ...btnPrimary, width: "100%", marginBottom: 10 }}><Plus size={16} /> Novo pedido (F2)</button>
+      {alternarImpressoraAqui && (
+        <button
+          onClick={alternarImpressoraAqui}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10,
+            background: impressoraAqui ? C.greenSoft : C.cardAlt, color: impressoraAqui ? C.green : C.textSoft,
+            border: `1px solid ${impressoraAqui ? C.green : C.border}`, borderRadius: 12, padding: "10px 14px", fontSize: 13, fontWeight: 700,
+          }}
+        >
+          {impressoraAqui ? <Check size={15} /> : <X size={15} />} Este aparelho imprime os pedidos enviados: {impressoraAqui ? "Ligado" : "Desligado"}
+        </button>
+      )}
 
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", left: 11, top: 13, color: C.textFaint }} />

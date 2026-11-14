@@ -2160,6 +2160,8 @@ export default function AdminApp() {
               return mapeado;
             }}
             imprimirPedido={imprimirPedido}
+            impressoraAqui={impressoraAqui}
+            alternarImpressoraAqui={alternarImpressoraAqui}
             abrirWhatsAppPedido={(p, tipoAviso) => {
               const tempo = mostrarTempoEntrega && Number(tempoEntregaMin) > 0
                 ? (tempoEntregaMin === tempoEntregaMax ? `${tempoEntregaMin} min` : `${tempoEntregaMin} a ${tempoEntregaMax} min`)
