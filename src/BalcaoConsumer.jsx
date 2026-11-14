@@ -29,6 +29,8 @@ const fmtDuracao = (ms) => {
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}`;
 };
 
+// dentro de cada grupo: em preparo/aguardando primeiro, depois "saiu para entrega", depois finalizados e cancelados
+const ordemStatus = (l) => (l.grupo === "cancelado" ? 3 : l.grupo === "finalizado" ? 2 : l.ehEntrega && l.ref.status === "pronto" ? 1 : 0);
 const ordemGrupo = (l) => (l.novo ? 0 : l.ehEntrega ? 1 : 2);
 const grupoPedido = (s) => (s === "concluido" ? "finalizado" : s === "cancelado" || s === "recusado" ? "cancelado" : "andamento");
 
@@ -145,7 +147,7 @@ export default function BalcaoConsumer({
       .filter((l) => filtroStatus === "todos" || l.grupo === filtroStatus)
       .filter((l) => !termo || semAcento(`${l.cod} ${l.cliente} ${l.entregaSub}`).includes(termo))
       // pedidos novos (aguardando aceite) primeiro, depois entregas, depois retiradas; dentro de cada grupo, o mais recente em cima
-      .sort((a, b) => (ordemGrupo(a) - ordemGrupo(b)) || String(b.abertura).localeCompare(String(a.abertura)));
+      .sort((a, b) => (ordemGrupo(a) - ordemGrupo(b)) || (ordemStatus(a) - ordemStatus(b)) || String(b.abertura).localeCompare(String(a.abertura)));
   }, [pedidos, dia, filtroOrigem, filtroStatus, pesquisa, agora, codigoPedido, dataLocalISO]);
 
   const validos = linhas.filter((l) => l.grupo !== "cancelado");
