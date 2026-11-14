@@ -119,7 +119,9 @@ export default function BalcaoConsumer({
 
   // ---------------- Linhas da tabela ----------------
   const linhas = useMemo(() => {
-    const doDia = (pedidos || []).filter((p) => (p.dataPedido || (p.createdAt ? dataLocalISO(new Date(p.createdAt)) : "")) === dia);
+    // com algo digitado na pesquisa, procura em todos os dias; sem pesquisa, mostra só o dia escolhido
+    const buscando = !!semAcento(pesquisa);
+    const doDia = (pedidos || []).filter((p) => buscando || (p.dataPedido || (p.createdAt ? dataLocalISO(new Date(p.createdAt)) : "")) === dia);
     const lista = doDia.map((p) => {
       const grupo = grupoPedido(p.status);
       const fim = p.concluidoEm || p.canceladoEm || null;
@@ -509,7 +511,7 @@ export default function BalcaoConsumer({
 
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", left: 11, top: 13, color: C.textFaint }} />
-        <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Pesquisar por nº, cliente ou endereço" style={{ ...inputStyle, paddingLeft: 33 }} />
+        <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Pesquisar por nº, cliente ou endereço (todos os dias)" style={{ ...inputStyle, paddingLeft: 33 }} />
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", overflowX: "auto", paddingBottom: 6, marginBottom: 6 }}>
         <input type="date" value={dia} onChange={(e) => setDia(e.target.value || hoje)} style={{ ...inputStyle, width: "auto", flexShrink: 0 }} />
