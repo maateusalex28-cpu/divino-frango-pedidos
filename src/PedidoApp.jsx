@@ -229,7 +229,7 @@ export default function PedidoApp() {
   const [form, setForm] = useState({
     nome: "",
     telefone: "",
-    tipoEntrega: "retirada",
+    tipoEntrega: "entrega",
     cep: "",
     rua: "",
     numero: "",
@@ -619,7 +619,7 @@ export default function PedidoApp() {
       localStorage.removeItem("divinoFrango_pedidoSalvoEm");
     } catch (e) {}
     setForm({
-      nome: "", telefone: "", tipoEntrega: "retirada", cep: "", rua: "", numero: "", bairro: "",
+      nome: "", telefone: "", tipoEntrega: "entrega", cep: "", rua: "", numero: "", bairro: "",
       referencia: "", formaPagamento: "Dinheiro", precisaTroco: false, trocoPara: "", observacao: "",
     });
     setTela("cardapio");
