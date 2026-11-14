@@ -952,13 +952,36 @@ export default function AdminApp() {
     setEditandoCardapioId(null);
   };
 
+  // reduz a foto antes de enviar (máx. 900 px, JPEG): foto de celular tem vários MB e estoura o limite de tráfego do Supabase
+  const reduzirFoto = (arquivo) =>
+    new Promise((resolve) => {
+      const url = URL.createObjectURL(arquivo);
+      const img = new Image();
+      img.onload = () => {
+        const escala = Math.min(1, 900 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * escala);
+        canvas.height = Math.round(img.height * escala);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((blob) => resolve(blob && blob.size < arquivo.size ? blob : arquivo), "image/jpeg", 0.8);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(arquivo); };
+      img.src = url;
+    });
+
   const onPickFotoCardapio = async (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     setUploadingFoto(true);
     try {
-      const path = `${uid()}-${file.name}`.replace(/\s+/g, "_");
-      const { error: upErr } = await supabase.storage.from("cardapio").upload(path, file, { upsert: true });
+      const reduzida = await reduzirFoto(file);
+      const path = `${uid()}-${file.name.replace(/\.[^.]+$/, "")}${reduzida === file ? file.name.match(/\.[^.]+$/)?.[0] || "" : ".jpg"}`.replace(/\s+/g, "_");
+      // cacheControl longo: o navegador do cliente guarda a foto e não baixa de novo a cada visita
+      const { error: upErr } = await supabase.storage.from("cardapio").upload(path, reduzida, { upsert: true, cacheControl: "31536000", contentType: reduzida.type || undefined });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from("cardapio").getPublicUrl(path);
       await salvarItemCardapio(pub.publicUrl);
