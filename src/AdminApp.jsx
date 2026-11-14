@@ -289,6 +289,7 @@ const linkWhatsAppCliente = (p, tipo, tempoEntrega) => {
 const mapCardapioFromDb = (r) => ({
   id: r.id,
   nome: r.nome,
+  nomeComanda: r.nome_comanda || "",
   descricao: r.descricao || "",
   preco: Number(r.preco),
   fotoUrl: r.foto_url || null,
@@ -305,6 +306,8 @@ const mapCardapioInsert = (c) => ({
   categoria: c.categoria || null,
   disponivel: c.disponivel,
   estoque: c.estoque === "" || c.estoque == null ? null : Number(c.estoque),
+  // nome só da comanda: só mexe na coluna quando preenchido (ou quando foi apagado)
+  ...(c.nomeComanda ? { nome_comanda: c.nomeComanda } : c.limparNomeComanda ? { nome_comanda: null } : {}),
 });
 
 const mapCaixaFromDb = (r) => ({
@@ -760,7 +763,7 @@ export default function AdminApp() {
       ? `<div class="linha"></div><div class="obs"><b>OBSERVAÇÃO:</b><br>${esc(pedido.observacao)}</div>`
       : "";
     const itensHtml = (pedido.itens || [])
-      .map((it) => `<tr><td>${it.qtd}x ${esc(it.nome)}</td><td style="text-align:right">${fmt(it.preco * it.qtd)}</td></tr>`)
+      .map((it) => `<tr><td>${it.qtd}x ${esc((cardapio.find((c) => c.id === it.id) || {}).nomeComanda || it.nome)}</td><td style="text-align:right">${fmt(it.preco * it.qtd)}</td></tr>`)
       .join("");
     janela.document.write(`
       <html><head><title>Pedido</title>
@@ -881,7 +884,7 @@ export default function AdminApp() {
   }, [session, impressoraAqui]);
 
   // ---------- cardápio ----------
-  const [formCardapio, setFormCardapio] = useState({ nome: "", descricao: "", preco: "", categoria: "", estoque: "" });
+  const [formCardapio, setFormCardapio] = useState({ nome: "", nomeComanda: "", descricao: "", preco: "", categoria: "", estoque: "" });
   const [editandoCardapioId, setEditandoCardapioId] = useState(null);
   const [uploadingFoto, setUploadingFoto] = useState(false);
   const cardapioFotoRef = useRef(null);
@@ -898,7 +901,7 @@ export default function AdminApp() {
 
   const abrirEdicaoCardapio = (item) => {
     setEditandoCardapioId(item.id);
-    setFormCardapio({ nome: item.nome, descricao: item.descricao, preco: String(item.preco), categoria: item.categoria, estoque: item.estoque == null ? "" : String(item.estoque) });
+    setFormCardapio({ nome: item.nome, nomeComanda: item.nomeComanda || "", descricao: item.descricao, preco: String(item.preco), categoria: item.categoria, estoque: item.estoque == null ? "" : String(item.estoque) });
   };
 
   // quando o Supabase não devolve nenhuma linha no update (sessão expirada, sem permissão ou item já removido)
@@ -915,6 +918,8 @@ export default function AdminApp() {
     if (!formCardapio.nome.trim() || !formCardapio.preco) return;
     const payload = {
       nome: formCardapio.nome.trim(),
+      nomeComanda: formCardapio.nomeComanda.trim(),
+      limparNomeComanda: !!(editandoCardapioId && cardapio.find((c) => c.id === editandoCardapioId)?.nomeComanda && !formCardapio.nomeComanda.trim()),
       descricao: formCardapio.descricao.trim(),
       preco: Number(formCardapio.preco),
       categoria: formCardapio.categoria.trim(),
@@ -943,7 +948,7 @@ export default function AdminApp() {
       setCardapio((prev) => [...prev, mapCardapioFromDb(inserted)]);
       showToast("Item adicionado ao cardápio");
     }
-    setFormCardapio({ nome: "", descricao: "", preco: "", categoria: "", estoque: "" });
+    setFormCardapio({ nome: "", nomeComanda: "", descricao: "", preco: "", categoria: "", estoque: "" });
     setEditandoCardapioId(null);
   };
 
@@ -2621,6 +2626,7 @@ export default function AdminApp() {
                 {editandoCardapioId ? "Editar item" : "Novo item do cardápio"}
               </div>
               <input placeholder="Nome (ex: Frango inteiro)" value={formCardapio.nome} onChange={(e) => setFormCardapio((f) => ({ ...f, nome: e.target.value }))} style={{ ...inputStyle, marginBottom: 8 }} />
+              <input placeholder="Nome na comanda (opcional, não muda no site)" value={formCardapio.nomeComanda} onChange={(e) => setFormCardapio((f) => ({ ...f, nomeComanda: e.target.value }))} style={{ ...inputStyle, marginBottom: 8 }} />
               <input placeholder="Descrição (opcional)" value={formCardapio.descricao} onChange={(e) => setFormCardapio((f) => ({ ...f, descricao: e.target.value }))} style={{ ...inputStyle, marginBottom: 8 }} />
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                 <input type="number" placeholder="Preço (R$)" value={formCardapio.preco} onChange={(e) => setFormCardapio((f) => ({ ...f, preco: e.target.value }))} style={{ ...inputStyle, flex: 1 }} />
@@ -2644,7 +2650,7 @@ export default function AdminApp() {
               <input ref={cardapioFotoRef} type="file" accept="image/*" onChange={onPickFotoCardapio} style={{ display: "none" }} id="cardapio-foto-input" />
               <div style={{ display: "flex", gap: 8 }}>
                 {editandoCardapioId && (
-                  <button onClick={() => { setEditandoCardapioId(null); setFormCardapio({ nome: "", descricao: "", preco: "", categoria: "", estoque: "" }); }} style={{ ...btnOutline, flex: 1 }}>
+                  <button onClick={() => { setEditandoCardapioId(null); setFormCardapio({ nome: "", nomeComanda: "", descricao: "", preco: "", categoria: "", estoque: "" }); }} style={{ ...btnOutline, flex: 1 }}>
                     Cancelar
                   </button>
                 )}
