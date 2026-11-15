@@ -449,12 +449,13 @@ export default function BalcaoConsumer({
     let extra = {};
     if (proximo === "pronto") extra = { pronto_em: agoraISO() };
     if (proximo === "concluido") extra = { concluido_em: agoraISO() };
+    if (proximo === "preparando" && p.status === "pronto") extra = { pronto_em: null }; // desfez o "saiu"
     if (proximo === "cancelado" || proximo === "recusado") {
       const motivo = window.prompt(proximo === "recusado" ? "Motivo da recusa (opcional):" : "Motivo do cancelamento (opcional):");
       if (motivo === null) return;
       extra = { cancelado_em: agoraISO(), motivo_cancelamento: motivo.trim() || null };
     }
-    const mensagem = proximo === "pronto" ? (p.tipoEntrega === "entrega" ? "Pedido saiu para entrega" : "Pedido aguardando retirada") : undefined;
+    const mensagem = proximo === "preparando" && p.status === "pronto" ? "Pedido voltou para em preparo" : proximo === "pronto" ? (p.tipoEntrega === "entrega" ? "Pedido saiu para entrega" : "Pedido aguardando retirada") : undefined;
     const ok = await atualizarStatusPedido(p.id, proximo, extra, mensagem);
     if (ok && ["concluido", "cancelado", "recusado"].includes(proximo)) setDetalheKey(null);
   };
@@ -852,6 +853,7 @@ export default function BalcaoConsumer({
               {p.status === "aceito" && <button onClick={() => acaoPedido(p, "preparando")} style={btnPrimary}><Check size={15} /> Iniciar preparo</button>}
               {p.status === "preparando" && <button onClick={() => acaoPedido(p, "pronto")} style={btnPrimary}><Check size={15} /> {ehEntrega ? "Saiu para entrega" : "Aguardando retirada"}</button>}
               {p.status === "pronto" && <button onClick={() => acaoPedido(p, "concluido")} style={btnPrimary}><Check size={15} /> Finalizar pedido</button>}
+              {p.status === "pronto" && <button onClick={() => acaoPedido(p, "preparando")} style={btnOutline}><ChevronLeft size={15} /> Voltar para em preparo</button>}
               <button onClick={() => setDetalheKey(null)} style={btnOutline}><ChevronLeft size={15} /> Voltar</button>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
