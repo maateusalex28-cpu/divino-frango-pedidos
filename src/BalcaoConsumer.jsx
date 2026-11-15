@@ -529,7 +529,7 @@ export default function BalcaoConsumer({
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", overflowX: "auto", paddingBottom: 6, marginBottom: 6 }}>
         <input type="date" value={dia} onChange={(e) => setDia(e.target.value || hoje)} style={{ ...inputStyle, width: "auto", flexShrink: 0 }} />
-        {[["todos", "Todos"], ["site", "Site"], ["balcao", "Balcão"]].map(([id, label]) => (
+        {[["todos", "Todos"], ["site", "Site"], ["balcao", "Loja"]].map(([id, label]) => (
           <button key={id} onClick={() => setFiltroOrigem(id)} style={chip(filtroOrigem === id)}>{label}</button>
         ))}
       </div>
@@ -575,7 +575,7 @@ export default function BalcaoConsumer({
                   <td style={td}>{fmtAbertura(l.abertura)}</td>
                   <td style={{ ...td, fontWeight: 700, color: l.andamento && l.duracao > 3600000 ? C.red : C.text }}>{l.duracao == null ? "—" : fmtDuracao(l.duracao)}</td>
                   <td style={{ ...td, fontWeight: 700 }}>{l.cliente}</td>
-                  <td style={td}>{l.origem === "balcao" ? "Balcão" : "Site"}</td>
+                  <td style={td}>{l.origem === "balcao" ? "Loja" : "Site"}</td>
                   <td style={td}>
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, background: cor.bg, color: cor.fg, whiteSpace: "nowrap" }}>{l.statusTxt}</span>
                   </td>
@@ -796,7 +796,7 @@ export default function BalcaoConsumer({
             )}
 
             <div style={{ fontSize: 13, lineHeight: 1.6, color: C.textSoft, marginBottom: 10 }}>
-              <div>Origem: <b style={{ color: C.text }}>{origem === "balcao" ? "Balcão" : "Site"}</b> · Aberto em {fmtAbertura(p.createdAt)}</div>
+              <div>Origem: <b style={{ color: C.text }}>{origem === "balcao" ? "Loja" : "Site"}</b> · Aberto em {fmtAbertura(p.createdAt)}</div>
               <div>
                 Lançado às <b style={{ color: C.text }}>{p.createdAt ? new Date(p.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—"}</b>
                 {" · "}{tempoCorrido.andamento ? "há " : "levou "}
