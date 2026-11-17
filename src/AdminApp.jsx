@@ -1491,15 +1491,13 @@ export default function AdminApp() {
     (async () => {
       setCarregandoRelatorio(true);
       try {
-        const desde = new Date();
-        desde.setDate(desde.getDate() - 30);
-        const { data, error } = await supabase
-          .from("movimentacoes_caixa")
-          .select("*")
-          .eq("tipo", "venda")
-          .gte("created_at", desde.toISOString())
-          .order("created_at", { ascending: false });
-        if (!error) setVendasBalcaoRelatorio((data || []).map(mapMovFromDb));
+        const fim = new Date();
+        const ini = new Date();
+        ini.setDate(ini.getDate() - 29);
+        // faturamento por dia calculado no banco: pedidos finalizados (site e loja) a partir da data de corte
+        const { data, error } = await supabase.rpc("financeiro_diario", { p_inicio: dataLocalISO(ini), p_fim: dataLocalISO(fim) });
+        if (error) showToast(`Erro ao carregar relatório: ${error.message}`);
+        if (!error) setVendasBalcaoRelatorio((data || []).map((r) => ({ dia: r.dia, valor: Number(r.faturamento) || 0 })));
       } catch (e) {
         showToast("Erro ao carregar relatório");
       } finally {
@@ -1509,11 +1507,11 @@ export default function AdminApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  const hojeISO = new Date().toISOString().slice(0, 10);
+  const hojeISO = dataLocalISO(new Date());
 
   const relatorio = useMemo(() => {
-    // faturamento = só o que é lançado no Caixa (o fechamento do dia já inclui os pedidos do site)
-    const balcaoHoje = vendasBalcaoRelatorio.filter((m) => (m.createdAt || "").slice(0, 10) === hojeISO).reduce((s, m) => s + m.valor, 0);
+    // faturamento = pedidos finalizados (site e loja), somados no banco por dia
+    const balcaoHoje = vendasBalcaoRelatorio.filter((m) => m.dia === hojeISO).reduce((s, m) => s + m.valor, 0);
     const balcaoMes = vendasBalcaoRelatorio.reduce((s, m) => s + m.valor, 0);
 
     // gráfico dos últimos 14 dias
@@ -1521,13 +1519,12 @@ export default function AdminApp() {
     for (let i = 13; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = dataLocalISO(d);
       const label = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-      const balcao = vendasBalcaoRelatorio.filter((m) => (m.createdAt || "").slice(0, 10) === iso).reduce((s, m) => s + m.valor, 0);
+      const balcao = vendasBalcaoRelatorio.filter((m) => m.dia === iso).reduce((s, m) => s + m.valor, 0);
       dias.push({ label, balcao: Number(balcao.toFixed(2)) });
     }
 
-    // pedidos (site e balcão) não entram nos relatórios
     return { balcaoHoje, balcaoMes, dias };
   }, [vendasBalcaoRelatorio, hojeISO]);
 
@@ -2613,7 +2610,7 @@ export default function AdminApp() {
                 <Card style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: C.orangeText, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Faturamento de hoje</div>
                   <div className="mono" style={{ fontSize: 30, fontWeight: 700, color: C.text, marginBottom: 8 }}>{fmt(relatorio.balcaoHoje)}</div>
-                  <div style={{ fontSize: 12, color: C.textSoft }}><Store size={11} style={{ verticalAlign: -1 }} /> Vendas lançadas no Caixa</div>
+                  <div style={{ fontSize: 12, color: C.textSoft }}><Store size={11} style={{ verticalAlign: -1 }} /> Pedidos finalizados (site e loja)</div>
                 </Card>
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>

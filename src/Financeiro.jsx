@@ -382,7 +382,7 @@ export default function Financeiro({
               <Titulo C={C}>Fluxo de caixa</Titulo>
               <Card>
                 <LinhaValor C={C} label="Entradas" valor={fmt(tot.fat)} cor={C.green} forte />
-                <LinhaValor C={C} label="Vendas (fechamento do dia)" valor={fmt(tot.fat)} recuo />
+                <LinhaValor C={C} label="Vendas (pedidos finalizados)" valor={fmt(tot.fat)} recuo />
                 <div style={{ borderTop: `1px solid ${C.borderSoft}`, margin: "6px 0" }} />
                 <LinhaValor C={C} label="Saídas" valor={fmt(tot.desp)} cor={C.orangeText} forte />
                 <LinhaValor C={C} label="Diárias" valor={fmt(tot.diarias)} recuo />
