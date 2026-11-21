@@ -642,6 +642,24 @@ export default function PedidoApp() {
     })();
   }, []);
 
+  // mantém o cardápio (estoque, esgotado, produtos ativados/desativados) em dia sem o cliente precisar recarregar:
+  // atualiza ao voltar para a aba e a cada 60 s enquanto a tela está visível
+  useEffect(() => {
+    let ativo = true;
+    const recarregarCardapio = async () => {
+      if (document.visibilityState !== "visible") return;
+      const { data, error } = await supabase.from("cardapio").select("*").eq("disponivel", true).order("created_at", { ascending: true });
+      if (ativo && !error && data) setCardapio(data.map(mapCardapioFromDb));
+    };
+    const t = setInterval(recarregarCardapio, 60000);
+    document.addEventListener("visibilitychange", recarregarCardapio);
+    return () => {
+      ativo = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", recarregarCardapio);
+    };
+  }, []);
+
   // acompanha o status do pedido atual: consulta a cada 3s enquanto a tela está aberta
   // (o tempo real do Supabase exige leitura da tabela inteira, que agora é só do painel)
   useEffect(() => {
